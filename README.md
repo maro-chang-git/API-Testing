@@ -2,12 +2,17 @@
 
 A structured test case reference for the [Testek Product Management REST API](https://testek.vn/lab/api/v0/prod-man/swagger-ui.html), with an interactive HTML viewer.
 
-## Files
+## Project structure
 
-| File | Purpose |
-|---|---|
-| `testcases.json` | Source of truth — all test cases as structured data |
-| `testcases.html` | Interactive viewer with filters and sorting |
+```
+API Testing/
+├── index.html          # Interactive viewer
+├── css/
+│   └── styles.css      # All styles
+├── data/
+│   └── testcases.json  # Source of truth — all test cases
+└── README.md
+```
 
 ## Test case structure
 
@@ -47,7 +52,7 @@ Press `Ctrl+C` to stop the server.
 
 ## Extending to other API groups
 
-Add new entries to the `testcases` array in `testcases.json`. The HTML viewer loads the file dynamically — no changes to the HTML needed.
+Add new entries to the `testcases` array in `data/testcases.json`. The viewer loads the file dynamically — no changes to the HTML or CSS needed.
 
 Suggested groups to add next (from the Swagger spec):
 
