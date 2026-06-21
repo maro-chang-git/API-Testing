@@ -5,6 +5,20 @@ let _spec      = null;   // full swagger spec (for basePath/host)
 let _activeTc         = null;   // test case currently being run
 let _onSaveResult     = null;   // callback(tcId, {actual_status, elapsed, passed})
 
+// ── Response tab switcher (runs once at module load; DOM is ready for ES modules) ──
+document.getElementById('rb-response').addEventListener('click', e => {
+  const btn = e.target.closest('.rb-res-tab');
+  if (!btn) return;
+  const tab = btn.dataset.resTab;
+  document.querySelectorAll('.rb-res-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const panes = { body: 'rb-res-body', headers: 'rb-res-headers', schema: 'rb-res-schema' };
+  Object.entries(panes).forEach(([key, id]) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = key === tab ? '' : 'none';
+  });
+});
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initRequestBuilder(profile, operation, spec) {
@@ -172,7 +186,7 @@ function renderBodySection() {
 
 // ── Schema → example builder ──────────────────────────────────────────────────
 
-function buildExampleFromSchema(schema, spec, _visited = new Set()) {
+export function buildExampleFromSchema(schema, spec, _visited = new Set()) {
   if (!schema) return null;
 
   // Resolve $ref
@@ -453,6 +467,8 @@ function showResponse({ status, statusText, headers, body, elapsed, url }) {
   bodyEl.textContent = body;
   bodyEl.className   = 'rb-res-pane' + (isJson(body) ? ' json' : '');
 
+  validateResponseSchema(status, body);
+
   // If a test case is active, show comparison + save button
   if (_activeTc) {
     const passed = status === _activeTc.expected_status;
@@ -517,6 +533,113 @@ function clearResponse() {
   const panel = document.getElementById('rb-response');
   panel.style.display = 'none';
   hideTcComparison();
+}
+
+// ── Schema validation ─────────────────────────────────────────────────────────
+
+function validateResponseSchema(status, body) {
+  const el = document.getElementById('rb-res-schema');
+  if (!el) return;
+
+  if (!_operation?.responses) {
+    el.innerHTML = schemaMsg('none', `No response definitions in spec.`);
+    return;
+  }
+
+  const resDef = _operation.responses[status] ?? _operation.responses['default'];
+  if (!resDef) {
+    el.innerHTML = schemaMsg('none', `No schema defined for status ${status}.`);
+    return;
+  }
+
+  const rawSchema = resDef.schema;
+  if (!rawSchema) {
+    el.innerHTML = schemaMsg('none', `Response ${status} has no schema (status-only response).`);
+    return;
+  }
+
+  let parsed;
+  try { parsed = JSON.parse(body); } catch {
+    el.innerHTML = schemaMsg('none', `Response body is not JSON — cannot validate schema.`);
+    return;
+  }
+
+  const schema = resolveSchemaRef(rawSchema, _spec);
+  const errors = [];
+  validateValue(parsed, schema, _spec, 'response', errors);
+
+  if (errors.length === 0) {
+    el.innerHTML = schemaMsg('pass', `Schema valid — all fields match the spec for status ${status}.`);
+  } else {
+    el.innerHTML = schemaMsg('fail', `${errors.length} issue${errors.length > 1 ? 's' : ''} found for status ${status}:`)
+      + `<ul class="rb-schema-errors">${errors.map(e => `<li><code>${escHtml(e.path)}</code> — ${escHtml(e.msg)}</li>`).join('')}</ul>`;
+  }
+}
+
+function resolveSchemaRef(schema, spec) {
+  if (!schema?.$ref) return schema;
+  const name = schema.$ref.replace(/^#\/definitions\//, '');
+  return spec?.definitions?.[name] ?? schema;
+}
+
+function validateValue(value, schema, spec, path, errors, visited = new Set()) {
+  if (!schema) return;
+
+  // Resolve $ref (with circular ref guard)
+  if (schema.$ref) {
+    const name = schema.$ref.replace(/^#\/definitions\//, '');
+    if (visited.has(name)) return;
+    visited = new Set(visited).add(name);
+    schema = spec?.definitions?.[name];
+    if (!schema) return;
+  }
+
+  const type = schema.type;
+
+  // Type check
+  if (type && value !== null && value !== undefined) {
+    const actual = Array.isArray(value) ? 'array' : typeof value;
+    const expectedJs = type === 'integer' ? 'number' : type;
+    if (actual !== expectedJs) {
+      errors.push({ path, msg: `expected ${type}, got ${actual}` });
+      return; // no point descending into wrong type
+    }
+    if (type === 'integer' && !Number.isInteger(value)) {
+      errors.push({ path, msg: `expected integer, got float` });
+    }
+  }
+
+  if (value === null || value === undefined) return;
+
+  // Object: check required + recurse into properties
+  if ((type === 'object' || schema.properties) && typeof value === 'object' && !Array.isArray(value)) {
+    const required = schema.required ?? [];
+    for (const req of required) {
+      if (!(req in value)) {
+        errors.push({ path: `${path}.${req}`, msg: `required field missing` });
+      }
+    }
+    const props = schema.properties ?? {};
+    for (const [key, propSchema] of Object.entries(props)) {
+      if (key in value) {
+        validateValue(value[key], propSchema, spec, `${path}.${key}`, errors, visited);
+      }
+    }
+    return;
+  }
+
+  // Array: check items
+  if (type === 'array' && Array.isArray(value) && schema.items) {
+    value.slice(0, 10).forEach((item, i) => {
+      validateValue(item, schema.items, spec, `${path}[${i}]`, errors, visited);
+    });
+  }
+}
+
+function schemaMsg(kind, text) {
+  const icon  = kind === 'pass' ? '✅' : kind === 'fail' ? '❌' : 'ℹ️';
+  const cls   = kind === 'pass' ? 'rb-schema-pass' : kind === 'fail' ? 'rb-schema-fail' : 'rb-schema-info';
+  return `<div class="rb-schema-summary ${cls}">${icon} ${escHtml(text)}</div>`;
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────

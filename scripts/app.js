@@ -1,11 +1,13 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './swagger-loader.js';
 import { profileEndpoint, matchTemplates, getOperation } from './template-matcher.js';
 import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult } from './request-builder.js';
+import { exportPostman } from './postman-collection-builder.js';
 
-let templates    = [];
-let currentSpec  = null;
-let currentProfile = null;
-let matchedCases = [];
+let templates       = [];
+let currentSpec     = null;
+let currentProfile  = null;
+let currentOperation = null;
+let matchedCases    = [];
 let results      = {};   // tcId → { actual_status, elapsed, passed, tested_at }
 let sortCol = 'id';
 let sortDir = 1;
@@ -55,16 +57,7 @@ function bindTabs() {
     });
   });
 
-  // Response sub-tabs inside Try It
-  document.addEventListener('click', e => {
-    const btn = e.target.closest('.rb-res-tab');
-    if (!btn) return;
-    const target = btn.dataset.resTab;
-    document.querySelectorAll('.rb-res-tab').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('rb-res-body').style.display    = target === 'body'    ? '' : 'none';
-    document.getElementById('rb-res-headers').style.display = target === 'headers' ? '' : 'none';
-  });
+  // Response sub-tabs handled in request-builder.js module-level listener
 }
 
 // ── Swagger / Tag / Endpoint cascade ─────────────────────────────────────────
@@ -123,8 +116,9 @@ function onEndpointChange(value) {
   const operation = getOperation(currentSpec, path, method);
   if (!operation) return;
 
-  currentProfile = profileEndpoint(path, method, operation);
-  matchedCases = matchTemplates(currentProfile, templates);
+  currentProfile   = profileEndpoint(path, method, operation);
+  currentOperation = operation;
+  matchedCases     = matchTemplates(currentProfile, templates);
 
   document.getElementById('api-meta').textContent =
     `${method}  ${path} — ${operation.summary || ''}`;
@@ -212,6 +206,7 @@ function bindFilters() {
   });
 
   document.getElementById('btn-export').addEventListener('click', exportCases);
+  document.getElementById('btn-postman').addEventListener('click', onExportPostman);
 }
 
 function applyFiltersAndRender() {
@@ -350,10 +345,16 @@ function exportCases() {
   URL.revokeObjectURL(url);
 }
 
+function onExportPostman() {
+  if (!currentProfile || !matchedCases.length || !currentSpec) return;
+  exportPostman(currentProfile, currentOperation, currentSpec, matchedCases);
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function setExportVisible(show) {
-  document.getElementById('btn-export').style.display = show ? '' : 'none';
+  document.getElementById('btn-export').style.display  = show ? '' : 'none';
+  document.getElementById('btn-postman').style.display = show ? '' : 'none';
 }
 
 function setPlaceholder(msg) {

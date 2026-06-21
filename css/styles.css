@@ -105,6 +105,20 @@ button#btn-export {
 }
 button#btn-export:hover { background: #4f46e5; }
 
+button#btn-postman {
+  background: #ea580c;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+button#btn-postman:hover { background: #c2410c; }
+
 /* ── Summary cards ── */
 .summary {
   display: flex;
@@ -318,6 +332,18 @@ td { padding: 10px 14px; vertical-align: top; }
   transition: border-color 0.15s;
 }
 .rb-base-url-input:focus { border-color: #6366f1; background: #fff; }
+.rb-proxy-btn {
+  font-size: 0.72rem;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  background: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.rb-proxy-btn:hover { background: #e2e8f0; border-color: #94a3b8; }
 .rb-cors-hint {
   font-size: 0.72rem;
   color: #92400e;
@@ -498,6 +524,40 @@ td { padding: 10px 14px; vertical-align: top; }
   overflow-y: auto;
   margin: 0;
   line-height: 1.6;
+}
+
+/* ── Schema validation panel ── */
+.rb-schema-pane {
+  background: #0f172a;
+  border-radius: 8px;
+  padding: 16px;
+  max-height: 360px;
+  overflow-y: auto;
+  font-size: 0.82rem;
+}
+.rb-schema-summary {
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  font-family: sans-serif;
+}
+.rb-schema-pass { background: #052e16; color: #86efac; }
+.rb-schema-fail { background: #450a0a; color: #fca5a5; }
+.rb-schema-info { background: #1e293b; color: #94a3b8; }
+.rb-schema-errors {
+  margin: 0;
+  padding: 0 0 0 18px;
+  color: #fca5a5;
+  font-family: monospace;
+  font-size: 0.78rem;
+  line-height: 1.8;
+}
+.rb-schema-errors code {
+  color: #f9a8d4;
+  background: #1e1b33;
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 /* ── Active TC banner (Try It) ── */
