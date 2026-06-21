@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Test Cases — Product Management</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 20px 32px;
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 600; }
+    header span { font-size: 0.8rem; color: #8892b0; }
+
+    .toolbar {
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 14px 32px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .toolbar label { font-size: 0.78rem; font-weight: 600; color: #64748b; margin-right: 4px; }
+
+    select, input[type="text"] {
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.82rem;
+      background: #f8fafc;
+      color: #1a1a2e;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    select:focus, input[type="text"]:focus { border-color: #6366f1; }
+
+    .count {
+      margin-left: auto;
+      font-size: 0.8rem;
+      color: #64748b;
+      white-space: nowrap;
+    }
+
+    .table-wrap {
+      padding: 24px 32px;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      font-size: 0.82rem;
+    }
+
+    thead tr { background: #1a1a2e; color: #e2e8f0; }
+    thead th {
+      padding: 11px 14px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+      cursor: pointer;
+      user-select: none;
+    }
+    thead th:hover { background: #2d2d44; }
+    thead th .sort-icon { opacity: 0.4; font-size: 0.7rem; margin-left: 4px; }
+    thead th.sorted .sort-icon { opacity: 1; }
+
+    tbody tr { border-bottom: 1px solid #f1f5f9; transition: background 0.1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #f8fafc; }
+
+    td { padding: 10px 14px; vertical-align: top; }
+
+    .tc-id { font-family: monospace; font-size: 0.78rem; color: #6366f1; font-weight: 600; white-space: nowrap; }
+
+    /* Method badges */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+    .method-GET    { background: #d1fae5; color: #065f46; }
+    .method-POST   { background: #dbeafe; color: #1e40af; }
+    .method-PUT    { background: #fef3c7; color: #92400e; }
+    .method-PATCH  { background: #ede9fe; color: #5b21b6; }
+    .method-DELETE { background: #fee2e2; color: #991b1b; }
+
+    /* Auth status badges */
+    .auth-valid    { background: #d1fae5; color: #065f46; }
+    .auth-missing  { background: #fee2e2; color: #991b1b; }
+    .auth-invalid  { background: #fef3c7; color: #92400e; }
+    .auth-expired  { background: #ffe4e6; color: #be123c; }
+
+    /* Category badges */
+    .cat-happy_path     { background: #d1fae5; color: #065f46; }
+    .cat-auth           { background: #ede9fe; color: #5b21b6; }
+    .cat-validation     { background: #fef3c7; color: #92400e; }
+    .cat-error_handling { background: #fee2e2; color: #991b1b; }
+    .cat-boundary       { background: #e0f2fe; color: #075985; }
+
+    /* Status code */
+    .status {
+      font-family: monospace;
+      font-weight: 700;
+      font-size: 0.82rem;
+    }
+    .s2xx { color: #059669; }
+    .s4xx { color: #d97706; }
+    .s5xx { color: #dc2626; }
+
+    .endpoint-cell { font-family: monospace; color: #374151; }
+    .purpose-cell  { color: #374151; max-width: 280px; }
+    .notes-cell    { color: #64748b; font-size: 0.78rem; max-width: 200px; }
+
+    .no-results {
+      text-align: center;
+      padding: 48px;
+      color: #94a3b8;
+      font-size: 0.9rem;
+    }
+
+    /* Summary cards */
+    .summary {
+      display: flex;
+      gap: 12px;
+      padding: 0 32px 20px;
+      flex-wrap: wrap;
+    }
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 12px 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+      min-width: 100px;
+      text-align: center;
+    }
+    .card .num { font-size: 1.6rem; font-weight: 700; color: #1a1a2e; }
+    .card .lbl { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>API Test Cases</h1>
+  <span id="api-meta">Loading…</span>
+</header>
+
+<div class="toolbar">
+  <div>
+    <label>Method</label>
+    <select id="f-method">
+      <option value="">All</option>
+      <option>GET</option>
+      <option>POST</option>
+      <option>PUT</option>
+      <option>PATCH</option>
+      <option>DELETE</option>
+    </select>
+  </div>
+  <div>
+    <label>Auth Status</label>
+    <select id="f-auth">
+      <option value="">All</option>
+      <option value="valid">Valid</option>
+      <option value="missing">Missing</option>
+      <option value="invalid">Invalid</option>
+      <option value="expired">Expired</option>
+    </select>
+  </div>
+  <div>
+    <label>Category</label>
+    <select id="f-cat">
+      <option value="">All</option>
+      <option value="happy_path">Happy Path</option>
+      <option value="auth">Auth</option>
+      <option value="validation">Validation</option>
+      <option value="error_handling">Error Handling</option>
+      <option value="boundary">Boundary</option>
+    </select>
+  </div>
+  <div>
+    <label>Status</label>
+    <select id="f-status">
+      <option value="">All</option>
+      <option value="2">2xx</option>
+      <option value="4">4xx</option>
+      <option value="5">5xx</option>
+    </select>
+  </div>
+  <div>
+    <input type="text" id="f-search" placeholder="Search ID, endpoint, purpose…" style="width:220px;" />
+  </div>
+  <div class="count" id="count-label"></div>
+</div>
+
+<div class="summary" id="summary-cards"></div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th data-col="id">ID <span class="sort-icon">↕</span></th>
+        <th data-col="method">Method <span class="sort-icon">↕</span></th>
+        <th data-col="endpoint">Endpoint <span class="sort-icon">↕</span></th>
+        <th data-col="auth_status">Auth Status <span class="sort-icon">↕</span></th>
+        <th data-col="category">Category <span class="sort-icon">↕</span></th>
+        <th data-col="purpose">Purpose</th>
+        <th data-col="expected_status">Expected Status <span class="sort-icon">↕</span></th>
+        <th data-col="notes">Notes</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div class="no-results" id="no-results" style="display:none;">No test cases match the current filters.</div>
+</div>
+
+<script>
+  let allData = [];
+  let sortCol = 'id';
+  let sortDir = 1;
+
+  async function load() {
+    const res = await fetch('testcases.json');
+    const json = await res.json();
+    allData = json.testcases;
+
+    document.getElementById('api-meta').textContent =
+      `${json.meta.api_name} · v${json.meta.version} · ${json.meta.base_url}`;
+
+    buildSummary();
+    render();
+  }
+
+  function buildSummary() {
+    const total = allData.length;
+    const cats = {};
+    allData.forEach(tc => { cats[tc.category] = (cats[tc.category] || 0) + 1; });
+
+    const cards = [
+      { num: total, lbl: 'Total Cases' },
+      { num: cats['happy_path'] || 0,     lbl: 'Happy Path' },
+      { num: cats['auth'] || 0,           lbl: 'Auth' },
+      { num: cats['validation'] || 0,     lbl: 'Validation' },
+      { num: cats['error_handling'] || 0, lbl: 'Error Handling' },
+    ];
+
+    document.getElementById('summary-cards').innerHTML = cards.map(c =>
+      `<div class="card"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
+    ).join('');
+  }
+
+  function statusClass(code) {
+    if (code >= 500) return 's5xx';
+    if (code >= 400) return 's4xx';
+    return 's2xx';
+  }
+
+  function render() {
+    const method  = document.getElementById('f-method').value;
+    const auth    = document.getElementById('f-auth').value;
+    const cat     = document.getElementById('f-cat').value;
+    const status  = document.getElementById('f-status').value;
+    const search  = document.getElementById('f-search').value.toLowerCase();
+
+    let rows = allData.filter(tc => {
+      if (method && tc.method !== method) return false;
+      if (auth   && tc.auth_status !== auth) return false;
+      if (cat    && tc.category !== cat) return false;
+      if (status && !String(tc.expected_status).startsWith(status)) return false;
+      if (search && ![tc.id, tc.endpoint, tc.purpose, tc.notes].join(' ').toLowerCase().includes(search)) return false;
+      return true;
+    });
+
+    rows = rows.slice().sort((a, b) => {
+      const va = String(a[sortCol] ?? '');
+      const vb = String(b[sortCol] ?? '');
+      return va.localeCompare(vb, undefined, { numeric: true }) * sortDir;
+    });
+
+    const tbody = document.getElementById('tbody');
+    const noRes = document.getElementById('no-results');
+
+    if (rows.length === 0) {
+      tbody.innerHTML = '';
+      noRes.style.display = '';
+    } else {
+      noRes.style.display = 'none';
+      tbody.innerHTML = rows.map(tc => `
+        <tr>
+          <td><span class="tc-id">${tc.id}</span></td>
+          <td><span class="badge method-${tc.method}">${tc.method}</span></td>
+          <td class="endpoint-cell">${tc.endpoint}</td>
+          <td><span class="badge auth-${tc.auth_status}">${tc.auth_status}</span></td>
+          <td><span class="badge cat-${tc.category}">${tc.category.replace('_', ' ')}</span></td>
+          <td class="purpose-cell">${tc.purpose}</td>
+          <td><span class="status ${statusClass(tc.expected_status)}">${tc.expected_status}</span></td>
+          <td class="notes-cell">${tc.notes || '—'}</td>
+        </tr>
+      `).join('');
+    }
+
+    document.getElementById('count-label').textContent = `Showing ${rows.length} of ${allData.length} cases`;
+  }
+
+  // Filters
+  ['f-method','f-auth','f-cat','f-status'].forEach(id =>
+    document.getElementById(id).addEventListener('change', render)
+  );
+  document.getElementById('f-search').addEventListener('input', render);
+
+  // Sort
+  document.querySelectorAll('thead th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (sortCol === col) { sortDir *= -1; }
+      else { sortCol = col; sortDir = 1; }
+      document.querySelectorAll('thead th').forEach(t => t.classList.remove('sorted'));
+      th.classList.add('sorted');
+      th.querySelector('.sort-icon').textContent = sortDir === 1 ? '↑' : '↓';
+      render();
+    });
+  });
+
+  load();
+</script>
+</body>
+</html>
