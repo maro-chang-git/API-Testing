@@ -70,6 +70,7 @@ export function matchTemplates(profile, templates) {
     auth_type: profile.auth_type,
     auth_status: tpl.auth_status,
     category: tpl.category,
+    tag: tpl.tag,
     purpose: tpl.purpose,
     expected_status: tpl.expected_status,
     notes: tpl.notes,

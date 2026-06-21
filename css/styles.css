@@ -92,6 +92,12 @@ button#btn-export:hover { background: #4f46e5; }
 .card .num { font-size: 1.6rem; font-weight: 700; color: #1a1a2e; }
 .card .lbl { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
 
+.card.cat-happy_path { border-left: 3px solid #059669; }
+.card.cat-positive   { border-left: 3px solid #0891b2; }
+.card.cat-negative   { border-left: 3px solid #d97706; }
+.card.cat-auth       { border-left: 3px solid #dc2626; }
+.card.cat-boundary   { border-left: 3px solid #0284c7; }
+
 /* ── Table ── */
 .table-wrap {
   padding: 0 32px 32px;
@@ -159,18 +165,21 @@ td { padding: 10px 14px; vertical-align: top; }
 .method-PATCH  { background: #ede9fe; color: #5b21b6; }
 .method-DELETE { background: #fee2e2; color: #991b1b; }
 
-/* Auth status */
-.auth-valid    { background: #d1fae5; color: #065f46; }
-.auth-missing  { background: #fee2e2; color: #991b1b; }
-.auth-invalid  { background: #fef3c7; color: #92400e; }
-.auth-expired  { background: #ffe4e6; color: #be123c; }
-
 /* Category */
-.cat-happy_path     { background: #d1fae5; color: #065f46; }
-.cat-auth           { background: #ede9fe; color: #5b21b6; }
-.cat-validation     { background: #fef3c7; color: #92400e; }
-.cat-error_handling { background: #fee2e2; color: #991b1b; }
-.cat-boundary       { background: #e0f2fe; color: #075985; }
+.cat-happy_path { background: #d1fae5; color: #065f46; }
+.cat-positive   { background: #cffafe; color: #155e75; }
+.cat-negative   { background: #fef3c7; color: #92400e; }
+.cat-auth       { background: #fee2e2; color: #991b1b; }
+.cat-boundary   { background: #e0f2fe; color: #075985; }
+
+/* Tag */
+.tag-valid     { background: #d1fae5; color: #065f46; }
+.tag-invalid   { background: #fee2e2; color: #991b1b; }
+.tag-missing   { background: #fef3c7; color: #92400e; }
+.tag-expired   { background: #ffe4e6; color: #be123c; }
+.tag-not_found { background: #f3e8ff; color: #6b21a8; }
+.tag-malformed { background: #ffedd5; color: #9a3412; }
+.tag-duplicate { background: #e0f2fe; color: #075985; }
 
 /* HTTP status code */
 .status { font-family: monospace; font-weight: 700; font-size: 0.82rem; }

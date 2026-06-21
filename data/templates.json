@@ -1,177 +1,338 @@
 {
-  "version": "1.0",
-  "description": "General-purpose test case templates. Matched against a selected swagger endpoint at runtime.",
+  "version": "2.1",
+  "description": "General-purpose test case templates matched against a selected swagger endpoint at runtime.",
+  "categories": ["happy_path", "positive", "negative", "auth", "boundary"],
+  "tags": ["valid", "invalid", "missing", "expired", "not_found", "malformed", "duplicate"],
   "templates": [
+    {
+      "id": "TPL-HP-001",
+      "category": "happy_path",
+      "tag": "valid",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list" },
+      "auth_status": "valid",
+      "purpose": "Return paginated list with default parameters",
+      "expected_status": 200,
+      "notes": "No query params — API uses its own defaults for page and size"
+    },
+    {
+      "id": "TPL-HP-002",
+      "category": "happy_path",
+      "tag": "valid",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "detail" },
+      "auth_status": "valid",
+      "purpose": "Return full detail for an existing record by valid ID",
+      "expected_status": 200,
+      "notes": "Use a known seeded or previously created ID"
+    },
+    {
+      "id": "TPL-HP-003",
+      "category": "happy_path",
+      "tag": "valid",
+      "applies_to": { "methods": ["POST"] },
+      "auth_status": "valid",
+      "purpose": "Successfully create a new resource with all required fields",
+      "expected_status": 201,
+      "notes": "Verify the response body contains the created resource with a generated ID"
+    },
+    {
+      "id": "TPL-HP-004",
+      "category": "happy_path",
+      "tag": "valid",
+      "applies_to": { "methods": ["PUT"] },
+      "auth_status": "valid",
+      "purpose": "Successfully replace an existing resource with valid data",
+      "expected_status": 200,
+      "notes": "Confirm updated values are reflected in a subsequent GET"
+    },
+    {
+      "id": "TPL-HP-005",
+      "category": "happy_path",
+      "tag": "valid",
+      "applies_to": { "methods": ["PATCH"] },
+      "auth_status": "valid",
+      "purpose": "Successfully apply a partial update to an existing resource",
+      "expected_status": 200,
+      "notes": "Only changed fields should differ; unchanged fields must remain intact"
+    },
+    {
+      "id": "TPL-HP-006",
+      "category": "happy_path",
+      "tag": "valid",
+      "applies_to": { "methods": ["DELETE"] },
+      "auth_status": "valid",
+      "purpose": "Successfully delete an existing resource by valid ID",
+      "expected_status": 200,
+      "notes": "Follow up with GET to confirm the resource is gone (expect 404)"
+    },
+    {
+      "id": "TPL-POS-001",
+      "category": "positive",
+      "tag": "valid",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
+      "auth_status": "valid",
+      "purpose": "Return filtered list when a valid keyword matches existing records",
+      "expected_status": 200,
+      "notes": "keyword=<known value> — result should be a non-empty subset of all records"
+    },
+    {
+      "id": "TPL-POS-002",
+      "category": "positive",
+      "tag": "valid",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
+      "auth_status": "valid",
+      "purpose": "Return correct page when explicit page and size params are provided",
+      "expected_status": 200,
+      "notes": "e.g. page=2&size=5 — verify total count and items are consistent"
+    },
+    {
+      "id": "TPL-POS-003",
+      "category": "positive",
+      "tag": "valid",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
+      "auth_status": "valid",
+      "purpose": "Return list sorted in ascending order by a supported field",
+      "expected_status": 200,
+      "notes": "e.g. sort=name,asc — verify the response order matches"
+    },
+    {
+      "id": "TPL-POS-004",
+      "category": "positive",
+      "tag": "valid",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
+      "auth_status": "valid",
+      "purpose": "Return list sorted in descending order by a supported field",
+      "expected_status": 200,
+      "notes": "e.g. sort=name,desc — verify the response order is reversed"
+    },
+    {
+      "id": "TPL-POS-005",
+      "category": "positive",
+      "tag": "valid",
+      "applies_to": { "methods": ["POST"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Successfully create a resource with all optional fields populated",
+      "expected_status": 201,
+      "notes": "Verify all optional fields are persisted and returned in the response"
+    },
+    {
+      "id": "TPL-POS-006",
+      "category": "positive",
+      "tag": "valid",
+      "applies_to": { "methods": ["POST"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Successfully create a resource with only required fields (omitting all optional ones)",
+      "expected_status": 201,
+      "notes": "Verify optional fields default to null or their defined default values"
+    },
+    {
+      "id": "TPL-POS-007",
+      "category": "positive",
+      "tag": "valid",
+      "applies_to": { "methods": ["PUT","PATCH"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Update a single field while leaving all other fields unchanged",
+      "expected_status": 200,
+      "notes": "Confirm only the targeted field changes; others remain as-is"
+    },
+    {
+      "id": "TPL-POS-008",
+      "category": "positive",
+      "tag": "valid",
+      "applies_to": { "methods": ["PUT","PATCH"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Update multiple fields in a single request",
+      "expected_status": 200,
+      "notes": "Verify all updated fields are reflected; unrelated fields are not affected"
+    },
+    {
+      "id": "TPL-NEG-001",
+      "category": "negative",
+      "tag": "missing",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Reject request when required body fields are missing",
+      "expected_status": 400,
+      "notes": "Send empty body {} — expect field-level error messages in response"
+    },
+    {
+      "id": "TPL-NEG-002",
+      "category": "negative",
+      "tag": "invalid",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Reject request when field values have invalid types",
+      "expected_status": 400,
+      "notes": "e.g. numeric field = 'abc', boolean field = 'yes'"
+    },
+    {
+      "id": "TPL-NEG-003",
+      "category": "negative",
+      "tag": "invalid",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Reject request when numeric fields are out of allowed range",
+      "expected_status": 400,
+      "notes": "e.g. price = -1, quantity = 999999999"
+    },
+    {
+      "id": "TPL-NEG-004",
+      "category": "negative",
+      "tag": "invalid",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Reject request when string fields exceed maximum allowed length",
+      "expected_status": 400,
+      "notes": "Send a string of 1000+ characters for a name or description field"
+    },
+    {
+      "id": "TPL-NEG-005",
+      "category": "negative",
+      "tag": "malformed",
+      "applies_to": { "methods": ["POST","PUT","PATCH"] },
+      "auth_status": "valid",
+      "purpose": "Reject request with malformed JSON body",
+      "expected_status": 400,
+      "notes": "Send Content-Type: application/json with invalid JSON syntax"
+    },
+    {
+      "id": "TPL-NEG-006",
+      "category": "negative",
+      "tag": "not_found",
+      "applies_to": { "methods": ["GET","PUT","PATCH","DELETE"], "has_path_params": true },
+      "auth_status": "valid",
+      "purpose": "Return 404 when the requested resource ID does not exist",
+      "expected_status": 404,
+      "notes": "Use a large non-existent ID, e.g. 999999999"
+    },
+    {
+      "id": "TPL-NEG-007",
+      "category": "negative",
+      "tag": "invalid",
+      "applies_to": { "methods": ["GET","PUT","PATCH","DELETE"], "has_path_params": true },
+      "auth_status": "valid",
+      "purpose": "Return 400 when the path param ID has an invalid format",
+      "expected_status": 400,
+      "notes": "Use a non-numeric or special-character ID, e.g. 'abc' or '@#$'"
+    },
+    {
+      "id": "TPL-NEG-008",
+      "category": "negative",
+      "tag": "duplicate",
+      "applies_to": { "methods": ["POST"] },
+      "auth_status": "valid",
+      "purpose": "Reject creation of a duplicate resource that violates a unique constraint",
+      "expected_status": 409,
+      "notes": "POST the same payload twice — second request should return 409 Conflict"
+    },
     {
       "id": "TPL-AUTH-001",
       "category": "auth",
+      "tag": "missing",
       "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
       "auth_status": "missing",
       "purpose": "Reject request when Authorization header is absent",
       "expected_status": 401,
-      "notes": "Send request with no Authorization header"
+      "notes": "Send request with no Authorization header at all"
     },
     {
       "id": "TPL-AUTH-002",
       "category": "auth",
+      "tag": "invalid",
       "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
       "auth_status": "invalid",
-      "purpose": "Reject request when token is malformed",
+      "purpose": "Reject request when the token is malformed or tampered",
       "expected_status": 401,
       "notes": "Authorization: Bearer invalid_token_xyz"
     },
     {
       "id": "TPL-AUTH-003",
       "category": "auth",
+      "tag": "expired",
       "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
       "auth_status": "expired",
-      "purpose": "Reject request when token is expired",
+      "purpose": "Reject request when the token has expired",
       "expected_status": 401,
-      "notes": "Use a previously valid token past its expiry"
+      "notes": "Use a real token past its expiry timestamp"
     },
     {
-      "id": "TPL-GET-LIST-001",
-      "category": "happy_path",
-      "applies_to": { "methods": ["GET"], "endpoint_type": "list" },
+      "id": "TPL-AUTH-004",
+      "category": "auth",
+      "tag": "invalid",
+      "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
       "auth_status": "valid",
-      "purpose": "Return paginated list with default params",
-      "expected_status": 200,
-      "notes": "No query params — API should use its defaults for page/size"
+      "purpose": "Reject request from a user with a valid token but insufficient permissions",
+      "expected_status": 403,
+      "notes": "Use a token for a low-privilege role that should not access this endpoint"
     },
     {
-      "id": "TPL-GET-LIST-002",
-      "category": "happy_path",
-      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
+      "id": "TPL-AUTH-005",
+      "category": "auth",
+      "tag": "invalid",
+      "applies_to": { "methods": ["GET","PUT","PATCH","DELETE"], "has_path_params": true, "auth_required": true },
       "auth_status": "valid",
-      "purpose": "Return filtered list matching a keyword",
-      "expected_status": 200,
-      "notes": "Query param: keyword=<known existing value>"
+      "purpose": "Reject access to a resource owned by another user",
+      "expected_status": 403,
+      "notes": "Use a valid token for User A but request a resource belonging to User B"
     },
     {
-      "id": "TPL-GET-LIST-003",
-      "category": "happy_path",
-      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
-      "auth_status": "valid",
-      "purpose": "Return empty list when keyword matches no records",
-      "expected_status": 200,
-      "notes": "Query param: keyword=zzznomatch999 — data array should be empty, not 404"
-    },
-    {
-      "id": "TPL-GET-LIST-004",
+      "id": "TPL-BND-001",
       "category": "boundary",
+      "tag": "valid",
       "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
       "auth_status": "valid",
-      "purpose": "Handle out-of-range pagination params gracefully",
+      "purpose": "Return empty list (not 404) when no records match the search criteria",
       "expected_status": 200,
-      "notes": "page=-1 or size=0 — should return empty or use defaults, not 500"
+      "notes": "keyword=zzznomatch999 — data array should be [] with total=0"
     },
     {
-      "id": "TPL-GET-ID-001",
-      "category": "happy_path",
-      "applies_to": { "methods": ["GET"], "endpoint_type": "detail" },
+      "id": "TPL-BND-002",
+      "category": "boundary",
+      "tag": "valid",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
       "auth_status": "valid",
-      "purpose": "Return full detail for an existing record by ID",
+      "purpose": "Handle page number beyond total pages gracefully",
       "expected_status": 200,
-      "notes": "Use a known valid ID"
+      "notes": "page=9999 — should return empty list, not an error"
     },
     {
-      "id": "TPL-GET-ID-002",
-      "category": "error_handling",
-      "applies_to": { "methods": ["GET"], "endpoint_type": "detail" },
+      "id": "TPL-BND-003",
+      "category": "boundary",
+      "tag": "valid",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
       "auth_status": "valid",
-      "purpose": "Return 404 when the requested ID does not exist",
-      "expected_status": 404,
-      "notes": "Use ID: 999999999"
+      "purpose": "Return all records on one page when size equals or exceeds total count",
+      "expected_status": 200,
+      "notes": "size=1000 — all records on one page; verify total matches"
     },
     {
-      "id": "TPL-GET-ID-003",
-      "category": "validation",
-      "applies_to": { "methods": ["GET"], "endpoint_type": "detail" },
+      "id": "TPL-BND-004",
+      "category": "boundary",
+      "tag": "valid",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
       "auth_status": "valid",
-      "purpose": "Return 400 when the ID path param is not a valid format",
-      "expected_status": 400,
-      "notes": "Use a non-numeric ID, e.g. 'abc'"
+      "purpose": "Accept request when string fields are exactly at the maximum allowed length",
+      "expected_status": 201,
+      "notes": "Send a string of exactly maxLength characters — should succeed"
     },
     {
-      "id": "TPL-POST-001",
-      "category": "happy_path",
+      "id": "TPL-BND-005",
+      "category": "boundary",
+      "tag": "valid",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Accept request when numeric fields are exactly at the minimum allowed value",
+      "expected_status": 201,
+      "notes": "e.g. price = 0 (if 0 is the defined minimum) — should succeed"
+    },
+    {
+      "id": "TPL-BND-006",
+      "category": "boundary",
+      "tag": "invalid",
       "applies_to": { "methods": ["POST"] },
       "auth_status": "valid",
-      "purpose": "Successfully create a resource with all required fields",
-      "expected_status": 201,
-      "notes": "Verify the created resource is returned in the response body"
-    },
-    {
-      "id": "TPL-POST-002",
-      "category": "validation",
-      "applies_to": { "methods": ["POST"], "has_body": true },
-      "auth_status": "valid",
-      "purpose": "Reject create request when required body fields are missing",
+      "purpose": "Handle extremely large request payload without crashing",
       "expected_status": 400,
-      "notes": "Send empty body {}"
-    },
-    {
-      "id": "TPL-POST-003",
-      "category": "validation",
-      "applies_to": { "methods": ["POST"], "has_body": true },
-      "auth_status": "valid",
-      "purpose": "Reject create request when field values have invalid types or are out of range",
-      "expected_status": 400,
-      "notes": "e.g. numeric field = -1, string field = null"
-    },
-    {
-      "id": "TPL-PUT-001",
-      "category": "happy_path",
-      "applies_to": { "methods": ["PUT","PATCH"] },
-      "auth_status": "valid",
-      "purpose": "Successfully update an existing resource",
-      "expected_status": 200,
-      "notes": "Verify updated fields are reflected in a subsequent GET"
-    },
-    {
-      "id": "TPL-PUT-002",
-      "category": "error_handling",
-      "applies_to": { "methods": ["PUT","PATCH"], "has_path_params": true },
-      "auth_status": "valid",
-      "purpose": "Return 404 when the target resource does not exist",
-      "expected_status": 404,
-      "notes": "Use ID: 999999999"
-    },
-    {
-      "id": "TPL-PUT-003",
-      "category": "validation",
-      "applies_to": { "methods": ["PUT","PATCH"], "has_body": true },
-      "auth_status": "valid",
-      "purpose": "Reject update when request body contains invalid field values",
-      "expected_status": 400,
-      "notes": "e.g. price = -999, required field = null"
-    },
-    {
-      "id": "TPL-DELETE-001",
-      "category": "happy_path",
-      "applies_to": { "methods": ["DELETE"] },
-      "auth_status": "valid",
-      "purpose": "Successfully delete an existing resource by ID",
-      "expected_status": 200,
-      "notes": "Confirm deletion with a follow-up GET"
-    },
-    {
-      "id": "TPL-DELETE-002",
-      "category": "error_handling",
-      "applies_to": { "methods": ["DELETE"], "has_path_params": true },
-      "auth_status": "valid",
-      "purpose": "Return 404 when trying to delete a resource that does not exist",
-      "expected_status": 404,
-      "notes": "Use ID: 999999999"
-    },
-    {
-      "id": "TPL-DELETE-003",
-      "category": "error_handling",
-      "applies_to": { "methods": ["DELETE"] },
-      "auth_status": "valid",
-      "purpose": "Verify the resource is no longer accessible after successful deletion",
-      "expected_status": 404,
-      "notes": "Follow-up GET using the just-deleted ID — should now return 404"
+      "notes": "Send a body with hundreds of extra unknown fields — expect 400, not 500"
     }
   ]
 }

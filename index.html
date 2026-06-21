@@ -36,24 +36,27 @@
   <div class="toolbar-divider"></div>
 
   <div class="toolbar-group">
-    <label>Auth Status</label>
-    <select id="f-auth">
-      <option value="">All</option>
-      <option value="valid">Valid</option>
-      <option value="missing">Missing</option>
-      <option value="invalid">Invalid</option>
-      <option value="expired">Expired</option>
-    </select>
-  </div>
-  <div class="toolbar-group">
     <label>Category</label>
     <select id="f-cat">
       <option value="">All</option>
       <option value="happy_path">Happy Path</option>
+      <option value="positive">Positive</option>
+      <option value="negative">Negative</option>
       <option value="auth">Auth</option>
-      <option value="validation">Validation</option>
-      <option value="error_handling">Error Handling</option>
       <option value="boundary">Boundary</option>
+    </select>
+  </div>
+  <div class="toolbar-group">
+    <label>Tag</label>
+    <select id="f-test-status">
+      <option value="">All</option>
+      <option value="valid">Valid</option>
+      <option value="invalid">Invalid</option>
+      <option value="missing">Missing</option>
+      <option value="expired">Expired</option>
+      <option value="not_found">Not Found</option>
+      <option value="malformed">Malformed</option>
+      <option value="duplicate">Duplicate</option>
     </select>
   </div>
   <div class="toolbar-group">
@@ -84,8 +87,8 @@
         <th data-col="id">ID <span class="sort-icon">↕</span></th>
         <th data-col="method">Method <span class="sort-icon">↕</span></th>
         <th data-col="endpoint">Endpoint <span class="sort-icon">↕</span></th>
-        <th data-col="auth_status">Auth Status <span class="sort-icon">↕</span></th>
         <th data-col="category">Category <span class="sort-icon">↕</span></th>
+        <th data-col="tag">Tag <span class="sort-icon">↕</span></th>
         <th data-col="purpose">Purpose</th>
         <th data-col="expected_status">Expected Status <span class="sort-icon">↕</span></th>
         <th data-col="notes">Notes</th>

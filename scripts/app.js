@@ -133,7 +133,7 @@ function bindFilters() {
     onEndpointChange(e.target.value);
   });
 
-  ['f-auth', 'f-cat', 'f-status'].forEach(id =>
+  ['f-cat', 'f-test-status', 'f-status'].forEach(id =>
     document.getElementById(id).addEventListener('change', applyFiltersAndRender)
   );
   document.getElementById('f-search').addEventListener('input', applyFiltersAndRender);
@@ -154,18 +154,22 @@ function bindFilters() {
 }
 
 function applyFiltersAndRender() {
-  if (!matchedCases.length) return;
+  if (!matchedCases.length) {
+    renderSummary([]);
+    renderTable([]);
+    return;
+  }
 
-  const auth   = document.getElementById('f-auth').value;
-  const cat    = document.getElementById('f-cat').value;
-  const status = document.getElementById('f-status').value;
-  const search = document.getElementById('f-search').value.toLowerCase();
+  const cat        = document.getElementById('f-cat').value;
+  const testStatus = document.getElementById('f-test-status').value;
+  const status     = document.getElementById('f-status').value;
+  const search     = document.getElementById('f-search').value.toLowerCase();
 
   let rows = matchedCases.filter(tc => {
-    if (auth   && tc.auth_status !== auth)   return false;
-    if (cat    && tc.category    !== cat)    return false;
-    if (status && !String(tc.expected_status).startsWith(status)) return false;
-    if (search && ![tc.id, tc.endpoint, tc.purpose, tc.notes].join(' ').toLowerCase().includes(search)) return false;
+    if (cat        && tc.category    !== cat)        return false;
+    if (testStatus && tc.tag !== testStatus) return false;
+    if (status     && !String(tc.expected_status).startsWith(status)) return false;
+    if (search     && ![tc.id, tc.endpoint, tc.purpose, tc.notes].join(' ').toLowerCase().includes(search)) return false;
     return true;
   });
 
@@ -188,16 +192,16 @@ function renderSummary(rows) {
   rows.forEach(tc => { cats[tc.category] = (cats[tc.category] || 0) + 1; });
 
   const cards = [
-    { num: rows.length,                    lbl: 'Matched' },
-    { num: cats['happy_path']     || 0,    lbl: 'Happy Path' },
-    { num: cats['auth']           || 0,    lbl: 'Auth' },
-    { num: cats['validation']     || 0,    lbl: 'Validation' },
-    { num: cats['error_handling'] || 0,    lbl: 'Error Handling' },
-    { num: cats['boundary']       || 0,    lbl: 'Boundary' },
+    { num: rows.length,               lbl: 'Matched',    cls: '' },
+    { num: cats['happy_path'] || 0,   lbl: 'Happy Path', cls: 'cat-happy_path' },
+    { num: cats['positive']   || 0,   lbl: 'Positive',   cls: 'cat-positive' },
+    { num: cats['negative']   || 0,   lbl: 'Negative',   cls: 'cat-negative' },
+    { num: cats['auth']       || 0,   lbl: 'Auth',       cls: 'cat-auth' },
+    { num: cats['boundary']   || 0,   lbl: 'Boundary',   cls: 'cat-boundary' },
   ];
 
   document.getElementById('summary-cards').innerHTML = cards.map(c =>
-    `<div class="card"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
+    `<div class="card${c.cls ? ' ' + c.cls : ''}"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
   ).join('');
 }
 
@@ -223,8 +227,8 @@ function renderTable(rows) {
         <td><span class="tc-id">${tc.id}</span></td>
         <td><span class="badge method-${tc.method}">${tc.method}</span></td>
         <td class="endpoint-cell">${tc.endpoint}</td>
-        <td><span class="badge auth-${tc.auth_status}">${tc.auth_status}</span></td>
         <td><span class="badge cat-${tc.category}">${tc.category.replace(/_/g, ' ')}</span></td>
+        <td><span class="badge tag-${tc.tag ?? ''}">${tc.tag ?? '—'}</span></td>
         <td class="purpose-cell">${tc.purpose}</td>
         <td><span class="status ${statusClass(tc.expected_status)}">${tc.expected_status}</span></td>
         <td class="notes-cell">${tc.notes || '—'}</td>
