@@ -218,6 +218,38 @@ td { padding: 10px 14px; vertical-align: top; }
 .s4xx { color: #d97706; }
 .s5xx { color: #dc2626; }
 
+/* ── Run button in table ── */
+.run-tc-btn {
+  background: none;
+  border: 1px solid #6366f1;
+  border-radius: 4px;
+  color: #6366f1;
+  font-size: 0.68rem;
+  padding: 2px 5px;
+  cursor: pointer;
+  margin-left: 6px;
+  vertical-align: middle;
+  opacity: 0.7;
+  transition: opacity 0.15s, background 0.15s;
+}
+.run-tc-btn:hover { opacity: 1; background: #6366f1; color: #fff; }
+
+/* ── Result badges in table ── */
+.result-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 2px 7px;
+  display: inline-block;
+}
+.result-untested { background: #f1f5f9; color: #94a3b8; }
+.result-pass     { background: #d1fae5; color: #065f46; }
+.result-fail     { background: #fee2e2; color: #991b1b; }
+.result-actual   { font-size: 0.7rem; color: #64748b; margin-left: 4px; font-family: monospace; }
+
+.row-pass td { background: #f0fdf4; }
+.row-fail td { background: #fff5f5; }
+
 /* ══════════════════════════════════════════════════════════════════
    TRY IT TAB
    ══════════════════════════════════════════════════════════════════ */
@@ -266,7 +298,36 @@ td { padding: 10px 14px; vertical-align: top; }
 .rb-endpoint-info { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .rb-path   { font-family: monospace; font-size: 0.9rem; color: #1a1a2e; font-weight: 600; }
 .rb-summary { font-size: 0.82rem; color: #64748b; margin-bottom: 8px; }
-.rb-base-url-row { font-size: 0.75rem; color: #94a3b8; }
+.rb-base-url-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.rb-base-url-label { font-size: 0.72rem; font-weight: 600; color: #94a3b8; white-space: nowrap; }
+.rb-base-url-input {
+  flex: 1;
+  font-family: monospace;
+  font-size: 0.78rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  padding: 4px 8px;
+  color: #374151;
+  background: #f8fafc;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.rb-base-url-input:focus { border-color: #6366f1; background: #fff; }
+.rb-cors-hint {
+  font-size: 0.72rem;
+  color: #92400e;
+  background: #fef3c7;
+  border-radius: 5px;
+  padding: 5px 9px;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+.rb-cors-hint a { color: #b45309; }
 .rb-mono { font-family: monospace; }
 
 /* ── Param rows ── */
@@ -438,3 +499,58 @@ td { padding: 10px 14px; vertical-align: top; }
   margin: 0;
   line-height: 1.6;
 }
+
+/* ── Active TC banner (Try It) ── */
+.rb-active-tc {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+}
+.rb-tc-id      { font-family: monospace; font-weight: 700; color: #1d4ed8; background: #dbeafe; padding: 2px 7px; border-radius: 4px; }
+.rb-tc-purpose { color: #1e40af; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rb-tc-expected { color: #3b82f6; font-weight: 600; white-space: nowrap; }
+.rb-tc-saved   { background: #d1fae5; color: #065f46; font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+.rb-clear-tc   { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 0.75rem; margin-left: auto; padding: 2px 4px; }
+.rb-clear-tc:hover { color: #dc2626; }
+
+/* ── TC comparison panel ── */
+.rb-tc-comparison {
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.rb-tc-comparison.tc-pass { background: #f0fdf4; border: 1px solid #bbf7d0; }
+.rb-tc-comparison.tc-fail { background: #fff5f5; border: 1px solid #fecaca; }
+
+.rb-tc-verdict { display: flex; align-items: center; gap: 8px; }
+.rb-verdict-icon  { font-size: 1.1rem; }
+.rb-verdict-label { font-weight: 700; font-size: 0.88rem; }
+.tc-pass .rb-verdict-label { color: #059669; }
+.tc-fail .rb-verdict-label { color: #dc2626; }
+.rb-verdict-detail { font-size: 0.8rem; color: #64748b; }
+
+.rb-save-result-btn {
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.rb-save-result-btn:hover { background: #4f46e5; }

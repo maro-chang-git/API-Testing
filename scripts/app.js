@@ -1,18 +1,23 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './swagger-loader.js';
 import { profileEndpoint, matchTemplates, getOperation } from './template-matcher.js';
-import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest } from './request-builder.js';
+import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult } from './request-builder.js';
 
-let templates = [];
-let currentSpec = null;
+let templates    = [];
+let currentSpec  = null;
 let currentProfile = null;
 let matchedCases = [];
+let results      = {};   // tcId → { actual_status, elapsed, passed, tested_at }
 let sortCol = 'id';
 let sortDir = 1;
 
 // Expose request-builder callbacks to inline onclick handlers
-window.__rbToggleAuth = toggleAuthInput;
-window.__rbAddHeader  = () => addHeaderRow();
-window.__rbSend       = sendRequest;
+window.__rbToggleAuth    = toggleAuthInput;
+window.__rbAddHeader     = () => addHeaderRow();
+window.__rbSend          = sendRequest;
+window.__rbClearActiveTc = () => { clearActiveTc(); };
+window.__rbSaveResult    = (actualStatus, elapsed, passed) => {
+  saveResult(actualStatus, elapsed, passed);
+};
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -102,6 +107,7 @@ function populateEndpoints(tag) {
 }
 
 function onEndpointChange(value) {
+  results = {};
   if (!value || !currentSpec) {
     currentProfile = null;
     matchedCases = [];
@@ -127,6 +133,24 @@ function onEndpointChange(value) {
   applyFiltersAndRender();
   initRequestBuilder(currentProfile, operation, currentSpec);
 }
+
+function runTc(tcId) {
+  const tc = matchedCases.find(c => c.id === tcId);
+  if (!tc) return;
+
+  // Switch to Try It tab
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector('.tab-btn[data-tab="tryit"]').classList.add('active');
+  document.getElementById('tab-tryit').classList.add('active');
+
+  runTestCase(tc, (id, result) => {
+    results[id] = result;
+    applyFiltersAndRender();
+  });
+}
+
+window.__rbRunTc = runTc;
 
 // ── Filter & render ───────────────────────────────────────────────────────────
 
@@ -170,7 +194,7 @@ function bindFilters() {
     onEndpointChange(e.target.value);
   });
 
-  ['f-cat', 'f-test-status', 'f-status'].forEach(id =>
+  ['f-cat', 'f-test-status', 'f-status', 'f-result'].forEach(id =>
     document.getElementById(id).addEventListener('change', applyFiltersAndRender)
   );
   document.getElementById('f-search').addEventListener('input', applyFiltersAndRender);
@@ -200,13 +224,20 @@ function applyFiltersAndRender() {
   const cat        = document.getElementById('f-cat').value;
   const testStatus = document.getElementById('f-test-status').value;
   const status     = document.getElementById('f-status').value;
+  const result     = document.getElementById('f-result').value;
   const search     = document.getElementById('f-search').value.toLowerCase();
 
   let rows = matchedCases.filter(tc => {
-    if (cat        && tc.category    !== cat)        return false;
-    if (testStatus && tc.tag !== testStatus) return false;
-    if (status     && !String(tc.expected_status).startsWith(status)) return false;
+    if (cat        && tc.category !== cat)                              return false;
+    if (testStatus && tc.tag !== testStatus)                            return false;
+    if (status     && !String(tc.expected_status).startsWith(status))  return false;
     if (search     && ![tc.id, tc.endpoint, tc.purpose, tc.notes].join(' ').toLowerCase().includes(search)) return false;
+    if (result) {
+      const r = results[tc.id];
+      if (result === 'untested' && r)                return false;
+      if (result === 'pass'     && (!r || !r.passed)) return false;
+      if (result === 'fail'     && (!r || r.passed))  return false;
+    }
     return true;
   });
 
@@ -259,18 +290,29 @@ function renderTable(rows) {
     noRes.style.display = '';
   } else {
     noRes.style.display = 'none';
-    tbody.innerHTML = rows.map(tc => `
-      <tr>
-        <td><span class="tc-id">${tc.id}</span></td>
+    tbody.innerHTML = rows.map(tc => {
+      const r   = results[tc.id];
+      const resBadge = r
+        ? r.passed
+          ? `<span class="result-badge result-pass">✅ Pass</span><span class="result-actual">${r.actual_status} · ${r.elapsed}ms</span>`
+          : `<span class="result-badge result-fail">❌ Fail</span><span class="result-actual">${r.actual_status} · ${r.elapsed}ms</span>`
+        : `<span class="result-badge result-untested">—</span>`;
+      return `
+      <tr class="${r ? (r.passed ? 'row-pass' : 'row-fail') : ''}">
+        <td>
+          <span class="tc-id">${tc.id}</span>
+          <button class="run-tc-btn" onclick="window.__rbRunTc('${tc.id}')" title="Run in Try It">▶</button>
+        </td>
         <td><span class="badge method-${tc.method}">${tc.method}</span></td>
         <td class="endpoint-cell">${tc.endpoint}</td>
         <td><span class="badge cat-${tc.category}">${tc.category.replace(/_/g, ' ')}</span></td>
         <td><span class="badge tag-${tc.tag ?? ''}">${tc.tag ?? '—'}</span></td>
         <td class="purpose-cell">${tc.purpose}</td>
         <td><span class="status ${statusClass(tc.expected_status)}">${tc.expected_status}</span></td>
+        <td>${resBadge}</td>
         <td class="notes-cell">${tc.notes || '—'}</td>
-      </tr>
-    `).join('');
+      </tr>`;
+    }).join('');
   }
 }
 
@@ -295,7 +337,10 @@ function exportCases() {
       summary: currentProfile.summary,
       auth_type: currentProfile.auth_type,
     },
-    testcases: matchedCases,
+    testcases: matchedCases.map(tc => ({
+      ...tc,
+      ...(results[tc.id] ? { result: results[tc.id] } : {}),
+    })),
   };
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });

@@ -84,6 +84,15 @@
       </select>
     </div>
     <div class="toolbar-group">
+      <label>Result</label>
+      <select id="f-result">
+        <option value="">All</option>
+        <option value="untested">Untested</option>
+        <option value="pass">Pass</option>
+        <option value="fail">Fail</option>
+      </select>
+    </div>
+    <div class="toolbar-group">
       <input type="text" id="f-search" placeholder="Search purpose, notes…" style="width:190px;" />
     </div>
     <div class="toolbar-actions">
@@ -105,6 +114,7 @@
           <th data-col="tag">Tag <span class="sort-icon">↕</span></th>
           <th data-col="purpose">Purpose</th>
           <th data-col="expected_status">Expected Status <span class="sort-icon">↕</span></th>
+          <th data-col="result">Result</th>
           <th data-col="notes">Notes</th>
         </tr>
       </thead>
@@ -132,7 +142,14 @@
           <span id="rb-path-display" class="rb-path"></span>
         </div>
         <div id="rb-summary-text" class="rb-summary"></div>
-        <div class="rb-base-url-row">Base URL: <span id="rb-base-url" class="rb-mono"></span></div>
+        <div class="rb-base-url-row">
+          <label class="rb-base-url-label">Base URL</label>
+          <input type="text" id="rb-base-url" class="rb-base-url-input" placeholder="https://…" spellcheck="false" />
+        </div>
+        <div class="rb-cors-hint">
+          ⚠ CORS: if requests are blocked, change Base URL to a local instance or prefix with a
+          <a href="https://corsproxy.io/" target="_blank" rel="noopener">CORS proxy</a>.
+        </div>
       </div>
 
       <div class="rb-section">
@@ -186,7 +203,13 @@
         <textarea id="rb-body" class="rb-body-editor" rows="8" spellcheck="false"></textarea>
       </div>
 
+      <!-- Active TC banner -->
+      <div id="rb-active-tc" class="rb-active-tc" style="display:none;"></div>
+
       <button id="rb-send-btn" onclick="window.__rbSend()">Send Request</button>
+
+      <!-- TC comparison (appears after send when a TC is active) -->
+      <div id="rb-tc-comparison" style="display:none;"></div>
 
       <!-- Response -->
       <div id="rb-response" style="display:none;">

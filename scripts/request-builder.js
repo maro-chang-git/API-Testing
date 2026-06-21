@@ -2,12 +2,16 @@ let _profile   = null;   // endpoint profile from template-matcher
 let _operation = null;   // raw swagger operation object
 let _spec      = null;   // full swagger spec (for basePath/host)
 
+let _activeTc         = null;   // test case currently being run
+let _onSaveResult     = null;   // callback(tcId, {actual_status, elapsed, passed})
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initRequestBuilder(profile, operation, spec) {
   _profile   = profile;
   _operation = operation;
   _spec      = spec;
+  _activeTc  = null;
 
   renderEndpointInfo();
   renderPathParams();
@@ -16,23 +20,82 @@ export function initRequestBuilder(profile, operation, spec) {
   renderBodySection();
   resetHeadersList();
   renderDefaultHeaders();
+  clearActiveTcBanner();
   clearResponse();
+}
+
+export function runTestCase(tc, onSaveResult) {
+  _activeTc      = tc;
+  _onSaveResult  = onSaveResult;
+
+  renderActiveTcBanner(tc);
+  applyAuthPreset(tc);
+  clearResponse();
+}
+
+export function clearActiveTc() {
+  _activeTc     = null;
+  _onSaveResult = null;
+  clearActiveTcBanner();
 }
 
 export function resetRequestBuilder() {
   _profile   = null;
   _operation = null;
   _spec      = null;
+  _activeTc  = null;
   document.getElementById('rb-method-badge').textContent = '';
   document.getElementById('rb-method-badge').className   = 'badge';
   document.getElementById('rb-path-display').textContent = '';
   document.getElementById('rb-summary-text').textContent = 'Select an endpoint to begin.';
-  document.getElementById('rb-base-url').textContent     = '';
+  document.getElementById('rb-base-url').value           = '';
   document.getElementById('rb-path-params').innerHTML    = '<p class="rb-empty">Select an endpoint first.</p>';
   document.getElementById('rb-query-params').innerHTML   = '<p class="rb-empty">Select an endpoint first.</p>';
   document.getElementById('rb-body-section').style.display = 'none';
   resetHeadersList();
+  clearActiveTcBanner();
   clearResponse();
+}
+
+// ── Active TC banner ──────────────────────────────────────────────────────────
+
+function renderActiveTcBanner(tc) {
+  const banner = document.getElementById('rb-active-tc');
+  banner.style.display = '';
+  banner.innerHTML = `
+    <span class="rb-tc-id">${tc.id}</span>
+    <span class="rb-tc-purpose">${escHtml(tc.purpose)}</span>
+    <span class="rb-tc-expected">Expected: <strong>${tc.expected_status}</strong></span>
+    <button class="rb-clear-tc" onclick="window.__rbClearActiveTc()">✕ Clear</button>
+  `;
+}
+
+function clearActiveTcBanner() {
+  const banner = document.getElementById('rb-active-tc');
+  if (banner) banner.style.display = 'none';
+}
+
+// ── Auth preset from test case ────────────────────────────────────────────────
+
+function applyAuthPreset(tc) {
+  const authType  = document.getElementById('rb-auth-type');
+  const authValue = document.getElementById('rb-auth-value');
+
+  if (tc.category === 'auth') {
+    if (tc.auth_status === 'missing') {
+      authType.value  = 'none';
+      authValue.value = '';
+    } else if (tc.auth_status === 'invalid') {
+      authType.value  = 'bearer';
+      authValue.value = 'invalid_token_tampered_xyz';
+    } else if (tc.auth_status === 'expired') {
+      authType.value  = 'bearer';
+      authValue.value = '';
+      authValue.placeholder = 'Paste an expired token here';
+    }
+    toggleAuthInput();
+    updateAutoAuthHeader();
+  }
 }
 
 function resetHeadersList() {
@@ -43,7 +106,7 @@ function resetHeadersList() {
 
 function renderEndpointInfo() {
   const baseUrl = `${_spec.schemes?.[0] ?? 'https'}://${_spec.host}${_spec.basePath ?? ''}`;
-  document.getElementById('rb-base-url').textContent  = baseUrl;
+  document.getElementById('rb-base-url').value         = baseUrl;
   document.getElementById('rb-method-badge').textContent  = _profile.method;
   document.getElementById('rb-method-badge').className    = `badge method-${_profile.method}`;
   document.getElementById('rb-path-display').textContent  = _profile.path;
@@ -314,7 +377,8 @@ export async function sendRequest() {
       url,
     });
   } catch (err) {
-    showError(err.message);
+    const isCors = err.message === 'Failed to fetch' || err.message?.includes('NetworkError');
+    showError(err.message, isCors);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Send Request';
@@ -324,8 +388,7 @@ export async function sendRequest() {
 // ── URL / headers / body builders ─────────────────────────────────────────────
 
 function buildUrl() {
-  const scheme  = _spec.schemes?.[0] ?? 'https';
-  const baseUrl = `${scheme}://${_spec.host}${_spec.basePath ?? ''}`;
+  const baseUrl = document.getElementById('rb-base-url').value.trim().replace(/\/$/, '');
 
   // Replace path params
   let path = _profile.path;
@@ -389,23 +452,71 @@ function showResponse({ status, statusText, headers, body, elapsed, url }) {
   const bodyEl = document.getElementById('rb-res-body');
   bodyEl.textContent = body;
   bodyEl.className   = 'rb-res-pane' + (isJson(body) ? ' json' : '');
+
+  // If a test case is active, show comparison + save button
+  if (_activeTc) {
+    const passed = status === _activeTc.expected_status;
+    showTcComparison(_activeTc, status, elapsed, passed);
+  } else {
+    hideTcComparison();
+  }
 }
 
-function showError(msg) {
+function showTcComparison(tc, actualStatus, elapsed, passed) {
+  const el = document.getElementById('rb-tc-comparison');
+  el.style.display = '';
+  el.className = `rb-tc-comparison ${passed ? 'tc-pass' : 'tc-fail'}`;
+  el.innerHTML = `
+    <div class="rb-tc-verdict">
+      <span class="rb-verdict-icon">${passed ? '✅' : '❌'}</span>
+      <span class="rb-verdict-label">${passed ? 'PASS' : 'FAIL'}</span>
+      <span class="rb-verdict-detail">
+        Expected <strong>${tc.expected_status}</strong> — Got <strong>${actualStatus}</strong>
+      </span>
+    </div>
+    <button class="rb-save-result-btn" onclick="window.__rbSaveResult(${actualStatus}, ${elapsed}, ${passed})">
+      Save Result to TC-${tc.id.replace('TC-','')}
+    </button>
+  `;
+}
+
+function hideTcComparison() {
+  const el = document.getElementById('rb-tc-comparison');
+  if (el) el.style.display = 'none';
+}
+
+function showError(msg, isCors = false) {
   const panel = document.getElementById('rb-response');
   panel.style.display = '';
   document.getElementById('rb-res-status').innerHTML =
-    `<span class="status s5xx">Network Error</span>`;
+    `<span class="status s5xx">${isCors ? 'CORS Blocked' : 'Network Error'}</span>`;
   document.getElementById('rb-res-url').textContent = '';
   document.getElementById('rb-res-headers').textContent = '';
   const errBodyEl = document.getElementById('rb-res-body');
-  errBodyEl.className   = 'rb-res-pane';
-  errBodyEl.textContent = `${msg}\n\nNote: CORS restrictions may block cross-origin requests from the browser. Use a CORS proxy or test from the same origin.`;
+  errBodyEl.className = 'rb-res-pane';
+  errBodyEl.textContent = isCors
+    ? `CORS policy blocked this request (${msg}).\n\nTo fix:\n  1. Change the Base URL (top-left) to a local instance of the API,\n     e.g. http://localhost:8080/api/v1\n\n  2. Or prefix the Base URL with a CORS proxy:\n     https://corsproxy.io/? + original URL\n\n  3. Or install a browser extension that disables CORS checks\n     (e.g. "CORS Unblock" for Chrome/Firefox — for dev use only).`
+    : msg;
+}
+
+export function saveResult(actualStatus, elapsed, passed) {
+  if (!_activeTc || !_onSaveResult) return;
+  _onSaveResult(_activeTc.id, { actual_status: actualStatus, elapsed, passed, tested_at: new Date().toISOString() });
+  // Update banner to reflect saved
+  const banner = document.getElementById('rb-active-tc');
+  const savedTag = banner.querySelector('.rb-tc-saved');
+  if (!savedTag) {
+    const span = document.createElement('span');
+    span.className = 'rb-tc-saved';
+    span.textContent = 'Saved';
+    banner.querySelector('.rb-clear-tc')?.before(span);
+  }
 }
 
 function clearResponse() {
   const panel = document.getElementById('rb-response');
   panel.style.display = 'none';
+  hideTcComparison();
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
