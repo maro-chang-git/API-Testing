@@ -8,9 +8,31 @@ let currentSpec     = null;
 let currentProfile  = null;
 let currentOperation = null;
 let matchedCases    = [];
-let results      = {};   // tcId → { actual_status, elapsed, passed, tested_at }
 let sortCol = 'id';
 let sortDir = 1;
+
+// ── Results store (persisted per endpoint in localStorage) ─────────────────────
+// resultsStore: { endpointKey → { tcId → { actual_status, elapsed, passed, tested_at } } }
+// `results` always points at the current endpoint's map, so writes flow into the store.
+const RESULTS_KEY = 'apitest.results.v1';
+let resultsStore       = loadResultsStore();
+let results            = {};
+let currentEndpointKey = null;
+
+function loadResultsStore() {
+  try { return JSON.parse(localStorage.getItem(RESULTS_KEY)) || {}; }
+  catch { return {}; }
+}
+
+function persistResults() {
+  try { localStorage.setItem(RESULTS_KEY, JSON.stringify(resultsStore)); }
+  catch { /* storage unavailable or over quota — keep results in memory only */ }
+}
+
+function endpointKey(method, path) {
+  const swagger = document.getElementById('f-swagger').value;
+  return `${swagger}|${method}|${path}`;
+}
 
 // Expose request-builder callbacks to inline onclick handlers
 window.__rbToggleAuth    = toggleAuthInput;
@@ -46,15 +68,16 @@ async function init() {
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 
+function activateTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.tab-btn[data-tab="${tab}"]`)?.classList.add('active');
+  document.getElementById(`tab-${tab}`)?.classList.add('active');
+}
+
 function bindTabs() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(`tab-${tab}`).classList.add('active');
-    });
+    btn.addEventListener('click', () => activateTab(btn.dataset.tab));
   });
 
   // Response sub-tabs handled in request-builder.js module-level listener
@@ -100,8 +123,10 @@ function populateEndpoints(tag) {
 }
 
 function onEndpointChange(value) {
-  results = {};
+  document.getElementById('f-result').value = '';   // result filter is endpoint-specific
   if (!value || !currentSpec) {
+    results = {};
+    currentEndpointKey = null;
     currentProfile = null;
     matchedCases = [];
     setExportVisible(false);
@@ -115,6 +140,10 @@ function onEndpointChange(value) {
   const [method, path] = value.split('|');
   const operation = getOperation(currentSpec, path, method);
   if (!operation) return;
+
+  // Point `results` at this endpoint's stored map (restores any saved results).
+  currentEndpointKey = endpointKey(method, path);
+  results = resultsStore[currentEndpointKey] ||= {};
 
   currentProfile   = profileEndpoint(path, method, operation);
   currentOperation = operation;
@@ -132,14 +161,11 @@ function runTc(tcId) {
   const tc = matchedCases.find(c => c.id === tcId);
   if (!tc) return;
 
-  // Switch to Try It tab
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelector('.tab-btn[data-tab="tryit"]').classList.add('active');
-  document.getElementById('tab-tryit').classList.add('active');
+  activateTab('tryit');
 
   runTestCase(tc, (id, result) => {
     results[id] = result;
+    persistResults();
     applyFiltersAndRender();
   });
 }
@@ -295,17 +321,17 @@ function renderTable(rows) {
       return `
       <tr class="${r ? (r.passed ? 'row-pass' : 'row-fail') : ''}">
         <td>
-          <span class="tc-id">${tc.id}</span>
-          <button class="run-tc-btn" onclick="window.__rbRunTc('${tc.id}')" title="Run in Try It">▶</button>
+          <span class="tc-id">${esc(tc.id)}</span>
+          <button class="run-tc-btn" onclick="window.__rbRunTc('${esc(tc.id)}')" title="Run in Try It">▶</button>
         </td>
-        <td><span class="badge method-${tc.method}">${tc.method}</span></td>
-        <td class="endpoint-cell">${tc.endpoint}</td>
-        <td><span class="badge cat-${tc.category}">${tc.category.replace(/_/g, ' ')}</span></td>
-        <td><span class="badge tag-${tc.tag ?? ''}">${tc.tag ?? '—'}</span></td>
-        <td class="purpose-cell">${tc.purpose}</td>
-        <td><span class="status ${statusClass(tc.expected_status)}">${tc.expected_status}</span></td>
+        <td><span class="badge method-${esc(tc.method)}">${esc(tc.method)}</span></td>
+        <td class="endpoint-cell">${esc(tc.endpoint)}</td>
+        <td><span class="badge cat-${esc(tc.category)}">${esc(tc.category.replace(/_/g, ' '))}</span></td>
+        <td><span class="badge tag-${esc(tc.tag ?? '')}">${esc(tc.tag ?? '—')}</span></td>
+        <td class="purpose-cell">${esc(tc.purpose)}</td>
+        <td><span class="status ${statusClass(tc.expected_status)}">${esc(tc.expected_status)}</span></td>
         <td>${resBadge}</td>
-        <td class="notes-cell">${tc.notes || '—'}</td>
+        <td class="notes-cell">${esc(tc.notes || '—')}</td>
       </tr>`;
     }).join('');
   }
@@ -351,6 +377,10 @@ function onExportPostman() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 function setExportVisible(show) {
   document.getElementById('btn-export').style.display  = show ? '' : 'none';

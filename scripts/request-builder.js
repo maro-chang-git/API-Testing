@@ -6,7 +6,7 @@ let _activeTc         = null;   // test case currently being run
 let _onSaveResult     = null;   // callback(tcId, {actual_status, elapsed, passed})
 
 // ── Response tab switcher (runs once at module load; DOM is ready for ES modules) ──
-document.getElementById('rb-response').addEventListener('click', e => {
+document.getElementById('rb-response')?.addEventListener('click', e => {
   const btn = e.target.closest('.rb-res-tab');
   if (!btn) return;
   const tab = btn.dataset.resTab;

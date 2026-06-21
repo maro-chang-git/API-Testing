@@ -16,6 +16,10 @@ export async function loadSwagger(file) {
   return res.json();
 }
 
+// Valid HTTP operation keys on a Swagger/OpenAPI path-item object.
+// Anything else (e.g. `parameters`, `$ref`, vendor `x-*` extensions) is not an operation.
+const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options']);
+
 /**
  * Extracts unique tag names from a swagger spec, preserving declaration order.
  * Returns: string[]
@@ -27,7 +31,8 @@ export function getTagsFromSpec(spec) {
   // Fallback: collect tags from paths
   const seen = new Set();
   Object.values(spec.paths || {}).forEach(methods => {
-    Object.values(methods).forEach(op => {
+    Object.entries(methods).forEach(([method, op]) => {
+      if (!HTTP_METHODS.has(method.toLowerCase())) return;
       (op.tags || []).forEach(t => seen.add(t));
     });
   });
@@ -45,6 +50,7 @@ export function getEndpointsByTag(spec, tag) {
 
   Object.entries(spec.paths || {}).forEach(([path, methodMap]) => {
     const methods = Object.entries(methodMap)
+      .filter(([method]) => HTTP_METHODS.has(method.toLowerCase()))
       .filter(([, op]) => !tag || (op.tags || []).includes(tag))
       .map(([method]) => method.toUpperCase());
 
