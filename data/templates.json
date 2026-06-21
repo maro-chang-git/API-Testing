@@ -1,0 +1,177 @@
+{
+  "version": "1.0",
+  "description": "General-purpose test case templates. Matched against a selected swagger endpoint at runtime.",
+  "templates": [
+    {
+      "id": "TPL-AUTH-001",
+      "category": "auth",
+      "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
+      "auth_status": "missing",
+      "purpose": "Reject request when Authorization header is absent",
+      "expected_status": 401,
+      "notes": "Send request with no Authorization header"
+    },
+    {
+      "id": "TPL-AUTH-002",
+      "category": "auth",
+      "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
+      "auth_status": "invalid",
+      "purpose": "Reject request when token is malformed",
+      "expected_status": 401,
+      "notes": "Authorization: Bearer invalid_token_xyz"
+    },
+    {
+      "id": "TPL-AUTH-003",
+      "category": "auth",
+      "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
+      "auth_status": "expired",
+      "purpose": "Reject request when token is expired",
+      "expected_status": 401,
+      "notes": "Use a previously valid token past its expiry"
+    },
+    {
+      "id": "TPL-GET-LIST-001",
+      "category": "happy_path",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list" },
+      "auth_status": "valid",
+      "purpose": "Return paginated list with default params",
+      "expected_status": 200,
+      "notes": "No query params — API should use its defaults for page/size"
+    },
+    {
+      "id": "TPL-GET-LIST-002",
+      "category": "happy_path",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
+      "auth_status": "valid",
+      "purpose": "Return filtered list matching a keyword",
+      "expected_status": 200,
+      "notes": "Query param: keyword=<known existing value>"
+    },
+    {
+      "id": "TPL-GET-LIST-003",
+      "category": "happy_path",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
+      "auth_status": "valid",
+      "purpose": "Return empty list when keyword matches no records",
+      "expected_status": 200,
+      "notes": "Query param: keyword=zzznomatch999 — data array should be empty, not 404"
+    },
+    {
+      "id": "TPL-GET-LIST-004",
+      "category": "boundary",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "list", "has_query_params": true },
+      "auth_status": "valid",
+      "purpose": "Handle out-of-range pagination params gracefully",
+      "expected_status": 200,
+      "notes": "page=-1 or size=0 — should return empty or use defaults, not 500"
+    },
+    {
+      "id": "TPL-GET-ID-001",
+      "category": "happy_path",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "detail" },
+      "auth_status": "valid",
+      "purpose": "Return full detail for an existing record by ID",
+      "expected_status": 200,
+      "notes": "Use a known valid ID"
+    },
+    {
+      "id": "TPL-GET-ID-002",
+      "category": "error_handling",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "detail" },
+      "auth_status": "valid",
+      "purpose": "Return 404 when the requested ID does not exist",
+      "expected_status": 404,
+      "notes": "Use ID: 999999999"
+    },
+    {
+      "id": "TPL-GET-ID-003",
+      "category": "validation",
+      "applies_to": { "methods": ["GET"], "endpoint_type": "detail" },
+      "auth_status": "valid",
+      "purpose": "Return 400 when the ID path param is not a valid format",
+      "expected_status": 400,
+      "notes": "Use a non-numeric ID, e.g. 'abc'"
+    },
+    {
+      "id": "TPL-POST-001",
+      "category": "happy_path",
+      "applies_to": { "methods": ["POST"] },
+      "auth_status": "valid",
+      "purpose": "Successfully create a resource with all required fields",
+      "expected_status": 201,
+      "notes": "Verify the created resource is returned in the response body"
+    },
+    {
+      "id": "TPL-POST-002",
+      "category": "validation",
+      "applies_to": { "methods": ["POST"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Reject create request when required body fields are missing",
+      "expected_status": 400,
+      "notes": "Send empty body {}"
+    },
+    {
+      "id": "TPL-POST-003",
+      "category": "validation",
+      "applies_to": { "methods": ["POST"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Reject create request when field values have invalid types or are out of range",
+      "expected_status": 400,
+      "notes": "e.g. numeric field = -1, string field = null"
+    },
+    {
+      "id": "TPL-PUT-001",
+      "category": "happy_path",
+      "applies_to": { "methods": ["PUT","PATCH"] },
+      "auth_status": "valid",
+      "purpose": "Successfully update an existing resource",
+      "expected_status": 200,
+      "notes": "Verify updated fields are reflected in a subsequent GET"
+    },
+    {
+      "id": "TPL-PUT-002",
+      "category": "error_handling",
+      "applies_to": { "methods": ["PUT","PATCH"], "has_path_params": true },
+      "auth_status": "valid",
+      "purpose": "Return 404 when the target resource does not exist",
+      "expected_status": 404,
+      "notes": "Use ID: 999999999"
+    },
+    {
+      "id": "TPL-PUT-003",
+      "category": "validation",
+      "applies_to": { "methods": ["PUT","PATCH"], "has_body": true },
+      "auth_status": "valid",
+      "purpose": "Reject update when request body contains invalid field values",
+      "expected_status": 400,
+      "notes": "e.g. price = -999, required field = null"
+    },
+    {
+      "id": "TPL-DELETE-001",
+      "category": "happy_path",
+      "applies_to": { "methods": ["DELETE"] },
+      "auth_status": "valid",
+      "purpose": "Successfully delete an existing resource by ID",
+      "expected_status": 200,
+      "notes": "Confirm deletion with a follow-up GET"
+    },
+    {
+      "id": "TPL-DELETE-002",
+      "category": "error_handling",
+      "applies_to": { "methods": ["DELETE"], "has_path_params": true },
+      "auth_status": "valid",
+      "purpose": "Return 404 when trying to delete a resource that does not exist",
+      "expected_status": 404,
+      "notes": "Use ID: 999999999"
+    },
+    {
+      "id": "TPL-DELETE-003",
+      "category": "error_handling",
+      "applies_to": { "methods": ["DELETE"] },
+      "auth_status": "valid",
+      "purpose": "Verify the resource is no longer accessible after successful deletion",
+      "expected_status": 404,
+      "notes": "Follow-up GET using the just-deleted ID — should now return 404"
+    }
+  ]
+}

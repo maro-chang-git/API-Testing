@@ -3,29 +3,39 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>API Test Cases — Product Management</title>
+  <title>API Test Cases</title>
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
 
 <header>
   <h1>API Test Cases</h1>
-  <span id="api-meta">Loading…</span>
+  <span id="api-meta">Select a Swagger to begin</span>
 </header>
 
 <div class="toolbar">
-  <div>
-    <label>Method</label>
-    <select id="f-method">
-      <option value="">All</option>
-      <option>GET</option>
-      <option>POST</option>
-      <option>PUT</option>
-      <option>PATCH</option>
-      <option>DELETE</option>
+  <div class="toolbar-group">
+    <label>Swagger</label>
+    <select id="f-swagger">
+      <option value="">— Select API —</option>
     </select>
   </div>
-  <div>
+  <div class="toolbar-group">
+    <label>Tag / Group</label>
+    <select id="f-tag" disabled>
+      <option value="">All Tags</option>
+    </select>
+  </div>
+  <div class="toolbar-group">
+    <label>Endpoint</label>
+    <select id="f-endpoint" disabled style="min-width:260px;">
+      <option value="">— Select Endpoint —</option>
+    </select>
+  </div>
+
+  <div class="toolbar-divider"></div>
+
+  <div class="toolbar-group">
     <label>Auth Status</label>
     <select id="f-auth">
       <option value="">All</option>
@@ -35,7 +45,7 @@
       <option value="expired">Expired</option>
     </select>
   </div>
-  <div>
+  <div class="toolbar-group">
     <label>Category</label>
     <select id="f-cat">
       <option value="">All</option>
@@ -46,8 +56,8 @@
       <option value="boundary">Boundary</option>
     </select>
   </div>
-  <div>
-    <label>Status</label>
+  <div class="toolbar-group">
+    <label>Status Code</label>
     <select id="f-status">
       <option value="">All</option>
       <option value="2">2xx</option>
@@ -55,10 +65,14 @@
       <option value="5">5xx</option>
     </select>
   </div>
-  <div>
-    <input type="text" id="f-search" placeholder="Search ID, endpoint, purpose…" style="width:220px;" />
+  <div class="toolbar-group">
+    <input type="text" id="f-search" placeholder="Search purpose, notes…" style="width:190px;" />
   </div>
-  <div class="count" id="count-label"></div>
+
+  <div class="toolbar-actions">
+    <span class="count" id="count-label"></span>
+    <button id="btn-export" style="display:none;">Export JSON</button>
+  </div>
 </div>
 
 <div class="summary" id="summary-cards"></div>
@@ -79,115 +93,9 @@
     </thead>
     <tbody id="tbody"></tbody>
   </table>
-  <div class="no-results" id="no-results" style="display:none;">No test cases match the current filters.</div>
+  <div class="no-results" id="no-results">Select a Tag and Endpoint to generate test cases</div>
 </div>
 
-<script>
-  let allData = [];
-  let sortCol = 'id';
-  let sortDir = 1;
-
-  async function load() {
-    const res = await fetch('data/testcases.json');
-    const json = await res.json();
-    allData = json.testcases;
-
-    document.getElementById('api-meta').textContent =
-      `${json.meta.api_name} · v${json.meta.version} · ${json.meta.base_url}`;
-
-    buildSummary();
-    render();
-  }
-
-  function buildSummary() {
-    const total = allData.length;
-    const cats = {};
-    allData.forEach(tc => { cats[tc.category] = (cats[tc.category] || 0) + 1; });
-
-    const cards = [
-      { num: total,                          lbl: 'Total Cases' },
-      { num: cats['happy_path']     || 0,    lbl: 'Happy Path' },
-      { num: cats['auth']           || 0,    lbl: 'Auth' },
-      { num: cats['validation']     || 0,    lbl: 'Validation' },
-      { num: cats['error_handling'] || 0,    lbl: 'Error Handling' },
-    ];
-
-    document.getElementById('summary-cards').innerHTML = cards.map(c =>
-      `<div class="card"><div class="num">${c.num}</div><div class="lbl">${c.lbl}</div></div>`
-    ).join('');
-  }
-
-  function statusClass(code) {
-    if (code >= 500) return 's5xx';
-    if (code >= 400) return 's4xx';
-    return 's2xx';
-  }
-
-  function render() {
-    const method = document.getElementById('f-method').value;
-    const auth   = document.getElementById('f-auth').value;
-    const cat    = document.getElementById('f-cat').value;
-    const status = document.getElementById('f-status').value;
-    const search = document.getElementById('f-search').value.toLowerCase();
-
-    let rows = allData.filter(tc => {
-      if (method && tc.method !== method) return false;
-      if (auth   && tc.auth_status !== auth) return false;
-      if (cat    && tc.category !== cat) return false;
-      if (status && !String(tc.expected_status).startsWith(status)) return false;
-      if (search && ![tc.id, tc.endpoint, tc.purpose, tc.notes].join(' ').toLowerCase().includes(search)) return false;
-      return true;
-    });
-
-    rows = rows.slice().sort((a, b) => {
-      const va = String(a[sortCol] ?? '');
-      const vb = String(b[sortCol] ?? '');
-      return va.localeCompare(vb, undefined, { numeric: true }) * sortDir;
-    });
-
-    const tbody = document.getElementById('tbody');
-    const noRes = document.getElementById('no-results');
-
-    if (rows.length === 0) {
-      tbody.innerHTML = '';
-      noRes.style.display = '';
-    } else {
-      noRes.style.display = 'none';
-      tbody.innerHTML = rows.map(tc => `
-        <tr>
-          <td><span class="tc-id">${tc.id}</span></td>
-          <td><span class="badge method-${tc.method}">${tc.method}</span></td>
-          <td class="endpoint-cell">${tc.endpoint}</td>
-          <td><span class="badge auth-${tc.auth_status}">${tc.auth_status}</span></td>
-          <td><span class="badge cat-${tc.category}">${tc.category.replace('_', ' ')}</span></td>
-          <td class="purpose-cell">${tc.purpose}</td>
-          <td><span class="status ${statusClass(tc.expected_status)}">${tc.expected_status}</span></td>
-          <td class="notes-cell">${tc.notes || '—'}</td>
-        </tr>
-      `).join('');
-    }
-
-    document.getElementById('count-label').textContent = `Showing ${rows.length} of ${allData.length} cases`;
-  }
-
-  ['f-method', 'f-auth', 'f-cat', 'f-status'].forEach(id =>
-    document.getElementById(id).addEventListener('change', render)
-  );
-  document.getElementById('f-search').addEventListener('input', render);
-
-  document.querySelectorAll('thead th[data-col]').forEach(th => {
-    th.addEventListener('click', () => {
-      const col = th.dataset.col;
-      if (sortCol === col) { sortDir *= -1; }
-      else { sortCol = col; sortDir = 1; }
-      document.querySelectorAll('thead th').forEach(t => t.classList.remove('sorted'));
-      th.classList.add('sorted');
-      th.querySelector('.sort-icon').textContent = sortDir === 1 ? '↑' : '↓';
-      render();
-    });
-  });
-
-  load();
-</script>
+<script type="module" src="scripts/app.js"></script>
 </body>
 </html>

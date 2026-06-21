@@ -29,6 +29,10 @@ header span { font-size: 0.8rem; color: #8892b0; }
   flex-wrap: wrap;
   align-items: center;
 }
+.toolbar-group { display: flex; align-items: center; gap: 6px; }
+.toolbar-group label { font-size: 0.78rem; font-weight: 600; color: #64748b; }
+.toolbar-divider { width: 1px; height: 28px; background: #e2e8f0; margin: 0 4px; }
+/* keep old label style for any bare labels */
 .toolbar label { font-size: 0.78rem; font-weight: 600; color: #64748b; margin-right: 4px; }
 
 select, input[type="text"] {
@@ -43,12 +47,32 @@ select, input[type="text"] {
 }
 select:focus, input[type="text"]:focus { border-color: #6366f1; }
 
-.count {
+.toolbar-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.count {
   font-size: 0.8rem;
   color: #64748b;
   white-space: nowrap;
 }
+
+button#btn-export {
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+button#btn-export:hover { background: #4f46e5; }
 
 /* ── Summary cards ── */
 .summary {
