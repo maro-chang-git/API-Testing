@@ -35,6 +35,37 @@ header span { font-size: 0.8rem; color: #8892b0; }
 /* keep old label style for any bare labels */
 .toolbar label { font-size: 0.78rem; font-weight: 600; color: #64748b; margin-right: 4px; }
 
+/* ── Tab switcher (in toolbar) ── */
+.tab-switcher { display: flex; gap: 4px; margin-left: auto; }
+.tab-btn {
+  background: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.tab-btn:hover { background: #f8fafc; border-color: #6366f1; color: #6366f1; }
+.tab-btn.active { background: #6366f1; border-color: #6366f1; color: #fff; }
+
+/* ── Tab panels ── */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ── Filter bar (test cases tab) ── */
+.filter-bar {
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 32px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 select, input[type="text"] {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
@@ -186,3 +217,224 @@ td { padding: 10px 14px; vertical-align: top; }
 .s2xx { color: #059669; }
 .s4xx { color: #d97706; }
 .s5xx { color: #dc2626; }
+
+/* ══════════════════════════════════════════════════════════════════
+   TRY IT TAB
+   ══════════════════════════════════════════════════════════════════ */
+
+.tryit-wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  height: calc(100vh - 110px);
+  overflow: hidden;
+}
+
+.tryit-left,
+.tryit-right {
+  overflow-y: auto;
+  padding: 24px 28px;
+}
+
+.tryit-left  { border-right: 1px solid #e2e8f0; background: #f8fafc; }
+.tryit-right { background: #fff; }
+
+/* ── Section blocks ── */
+.rb-section {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.tryit-right .rb-section { border: none; border-bottom: 1px solid #f1f5f9; border-radius: 0; padding: 16px 0; margin-bottom: 0; }
+.tryit-right .rb-section:first-child { padding-top: 0; }
+
+.rb-section-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Endpoint info ── */
+.rb-endpoint-info { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.rb-path   { font-family: monospace; font-size: 0.9rem; color: #1a1a2e; font-weight: 600; }
+.rb-summary { font-size: 0.82rem; color: #64748b; margin-bottom: 8px; }
+.rb-base-url-row { font-size: 0.75rem; color: #94a3b8; }
+.rb-mono { font-family: monospace; }
+
+/* ── Param rows ── */
+.rb-param-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.rb-param-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #374151;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rb-param-input, .rb-section input[type="text"], .rb-section select, .rb-section textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  background: #f8fafc;
+  color: #1a1a2e;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.15s;
+}
+.rb-section input[type="text"]:focus,
+.rb-section select:focus,
+.rb-section textarea:focus,
+.rb-param-input:focus { border-color: #6366f1; background: #fff; }
+
+.rb-required { color: #dc2626; }
+.rb-hint     { font-size: 0.68rem; font-weight: 400; color: #94a3b8; text-transform: none; letter-spacing: 0; }
+.rb-empty    { font-size: 0.8rem; color: #94a3b8; }
+
+/* ── Headers editor ── */
+.rb-add-btn {
+  background: none;
+  border: 1px solid #6366f1;
+  border-radius: 4px;
+  color: #6366f1;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+  margin-left: auto;
+}
+.rb-add-btn:hover { background: #6366f1; color: #fff; }
+
+.rb-header-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+.rb-remove-btn {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 4px;
+  line-height: 1;
+}
+.rb-remove-btn:hover { color: #dc2626; }
+
+.rb-header-auto .rb-header-key,
+.rb-header-auto .rb-header-val {
+  background: #f1f5f9;
+  color: #475569;
+  cursor: default;
+}
+.rb-auto-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #e0f2fe;
+  color: #0369a1;
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  align-self: center;
+}
+.rb-header-auto[data-auto-auth] .rb-auto-badge {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* ── Body editor ── */
+.rb-body-editor {
+  width: 100%;
+  font-family: monospace;
+  font-size: 0.82rem;
+  resize: vertical;
+  min-height: 140px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #1a1a2e;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.rb-body-editor:focus {
+  border-color: #6366f1;
+  background: #fff;
+}
+
+/* ── Send button ── */
+#rb-send-btn {
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 28px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  margin: 16px 0;
+  transition: background 0.15s;
+}
+#rb-send-btn:hover    { background: #4f46e5; }
+#rb-send-btn:disabled { background: #a5b4fc; cursor: not-allowed; }
+
+/* ── Response panel ── */
+.rb-res-title { margin-top: 8px; }
+.rb-res-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 0.82rem;
+}
+.rb-res-label  { font-weight: 600; color: #64748b; min-width: 52px; font-size: 0.75rem; }
+.rb-res-url    { word-break: break-all; color: #374151; }
+.rb-elapsed    { font-size: 0.75rem; color: #64748b; margin-left: 8px; }
+
+.rb-res-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.rb-res-tab {
+  background: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+}
+.rb-res-tab.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
+
+.rb-res-pane {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 0.78rem;
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 360px;
+  overflow-y: auto;
+  margin: 0;
+  line-height: 1.6;
+}

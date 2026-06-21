@@ -13,6 +13,7 @@
   <span id="api-meta">Select a Swagger to begin</span>
 </header>
 
+<!-- ── Shared toolbar (swagger / tag / endpoint selectors) ── -->
 <div class="toolbar">
   <div class="toolbar-group">
     <label>Swagger</label>
@@ -35,68 +36,182 @@
 
   <div class="toolbar-divider"></div>
 
-  <div class="toolbar-group">
-    <label>Category</label>
-    <select id="f-cat">
-      <option value="">All</option>
-      <option value="happy_path">Happy Path</option>
-      <option value="positive">Positive</option>
-      <option value="negative">Negative</option>
-      <option value="auth">Auth</option>
-      <option value="boundary">Boundary</option>
-    </select>
-  </div>
-  <div class="toolbar-group">
-    <label>Tag</label>
-    <select id="f-test-status">
-      <option value="">All</option>
-      <option value="valid">Valid</option>
-      <option value="invalid">Invalid</option>
-      <option value="missing">Missing</option>
-      <option value="expired">Expired</option>
-      <option value="not_found">Not Found</option>
-      <option value="malformed">Malformed</option>
-      <option value="duplicate">Duplicate</option>
-    </select>
-  </div>
-  <div class="toolbar-group">
-    <label>Status Code</label>
-    <select id="f-status">
-      <option value="">All</option>
-      <option value="2">2xx</option>
-      <option value="4">4xx</option>
-      <option value="5">5xx</option>
-    </select>
-  </div>
-  <div class="toolbar-group">
-    <input type="text" id="f-search" placeholder="Search purpose, notes…" style="width:190px;" />
-  </div>
-
-  <div class="toolbar-actions">
-    <span class="count" id="count-label"></span>
-    <button id="btn-export" style="display:none;">Export JSON</button>
+  <!-- Tab switcher -->
+  <div class="tab-switcher">
+    <button class="tab-btn active" data-tab="testcases">Test Cases</button>
+    <button class="tab-btn"        data-tab="tryit">Try It</button>
   </div>
 </div>
 
-<div class="summary" id="summary-cards"></div>
+<!-- ══════════════════════════════════════════════════════════════════
+     TAB 1 — Test Cases
+     ══════════════════════════════════════════════════════════════════ -->
+<div id="tab-testcases" class="tab-panel active">
 
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr>
-        <th data-col="id">ID <span class="sort-icon">↕</span></th>
-        <th data-col="method">Method <span class="sort-icon">↕</span></th>
-        <th data-col="endpoint">Endpoint <span class="sort-icon">↕</span></th>
-        <th data-col="category">Category <span class="sort-icon">↕</span></th>
-        <th data-col="tag">Tag <span class="sort-icon">↕</span></th>
-        <th data-col="purpose">Purpose</th>
-        <th data-col="expected_status">Expected Status <span class="sort-icon">↕</span></th>
-        <th data-col="notes">Notes</th>
-      </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-  </table>
-  <div class="no-results" id="no-results">Select a Tag and Endpoint to generate test cases</div>
+  <!-- Filter bar -->
+  <div class="filter-bar">
+    <div class="toolbar-group">
+      <label>Category</label>
+      <select id="f-cat">
+        <option value="">All</option>
+        <option value="happy_path">Happy Path</option>
+        <option value="positive">Positive</option>
+        <option value="negative">Negative</option>
+        <option value="auth">Auth</option>
+        <option value="boundary">Boundary</option>
+      </select>
+    </div>
+    <div class="toolbar-group">
+      <label>Tag</label>
+      <select id="f-test-status">
+        <option value="">All</option>
+        <option value="valid">Valid</option>
+        <option value="invalid">Invalid</option>
+        <option value="missing">Missing</option>
+        <option value="expired">Expired</option>
+        <option value="not_found">Not Found</option>
+        <option value="malformed">Malformed</option>
+        <option value="duplicate">Duplicate</option>
+      </select>
+    </div>
+    <div class="toolbar-group">
+      <label>Status Code</label>
+      <select id="f-status">
+        <option value="">All</option>
+        <option value="2">2xx</option>
+        <option value="4">4xx</option>
+        <option value="5">5xx</option>
+      </select>
+    </div>
+    <div class="toolbar-group">
+      <input type="text" id="f-search" placeholder="Search purpose, notes…" style="width:190px;" />
+    </div>
+    <div class="toolbar-actions">
+      <span class="count" id="count-label"></span>
+      <button id="btn-export" style="display:none;">Export JSON</button>
+    </div>
+  </div>
+
+  <div class="summary" id="summary-cards"></div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-col="id">ID <span class="sort-icon">↕</span></th>
+          <th data-col="method">Method <span class="sort-icon">↕</span></th>
+          <th data-col="endpoint">Endpoint <span class="sort-icon">↕</span></th>
+          <th data-col="category">Category <span class="sort-icon">↕</span></th>
+          <th data-col="tag">Tag <span class="sort-icon">↕</span></th>
+          <th data-col="purpose">Purpose</th>
+          <th data-col="expected_status">Expected Status <span class="sort-icon">↕</span></th>
+          <th data-col="notes">Notes</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="no-results" id="no-results">Select a Tag and Endpoint to generate test cases</div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════
+     TAB 2 — Try It
+     ══════════════════════════════════════════════════════════════════ -->
+<div id="tab-tryit" class="tab-panel">
+
+  <div class="tryit-wrap">
+
+    <!-- Left column: endpoint info + params -->
+    <div class="tryit-left">
+
+      <div class="rb-section">
+        <div class="rb-section-title">Endpoint</div>
+        <div id="rb-endpoint-info" class="rb-endpoint-info">
+          <span id="rb-method-badge" class="badge"></span>
+          <span id="rb-path-display" class="rb-path"></span>
+        </div>
+        <div id="rb-summary-text" class="rb-summary"></div>
+        <div class="rb-base-url-row">Base URL: <span id="rb-base-url" class="rb-mono"></span></div>
+      </div>
+
+      <div class="rb-section">
+        <div class="rb-section-title">Path Parameters</div>
+        <div id="rb-path-params"><p class="rb-empty">Select an endpoint first.</p></div>
+      </div>
+
+      <div class="rb-section">
+        <div class="rb-section-title">Query Parameters</div>
+        <div id="rb-query-params"><p class="rb-empty">Select an endpoint first.</p></div>
+      </div>
+
+    </div>
+
+    <!-- Right column: auth + headers + body + send -->
+    <div class="tryit-right">
+
+      <div class="rb-section">
+        <div class="rb-section-title">Authentication</div>
+        <div class="rb-param-row">
+          <label class="rb-param-name">Type</label>
+          <select id="rb-auth-type" onchange="window.__rbToggleAuth()">
+            <option value="none">None</option>
+            <option value="bearer">Bearer Token</option>
+            <option value="api_key_header">API Key — Header</option>
+            <option value="api_key_query">API Key — Query Param</option>
+            <option value="cookie">Cookie</option>
+            <option value="basic">Basic Auth (user:pass)</option>
+          </select>
+        </div>
+        <div id="rb-auth-key-row" class="rb-param-row" style="display:none;">
+          <label class="rb-param-name">Header name</label>
+          <input type="text" id="rb-auth-key" placeholder="X-API-Key" />
+        </div>
+        <div id="rb-auth-value-row" class="rb-param-row" style="display:none;">
+          <label class="rb-param-name">Value</label>
+          <input type="text" id="rb-auth-value" placeholder="" />
+        </div>
+      </div>
+
+      <div class="rb-section">
+        <div class="rb-section-title">
+          Headers
+          <button class="rb-add-btn" onclick="window.__rbAddHeader()">+ Add</button>
+        </div>
+        <div id="rb-headers-list"></div>
+      </div>
+
+      <div class="rb-section" id="rb-body-section" style="display:none;">
+        <div class="rb-section-title">Request Body <span class="rb-hint">JSON</span></div>
+        <textarea id="rb-body" class="rb-body-editor" rows="8" spellcheck="false"></textarea>
+      </div>
+
+      <button id="rb-send-btn" onclick="window.__rbSend()">Send Request</button>
+
+      <!-- Response -->
+      <div id="rb-response" style="display:none;">
+        <div class="rb-section-title rb-res-title">Response</div>
+
+        <div class="rb-res-row">
+          <span class="rb-res-label">Status</span>
+          <span id="rb-res-status"></span>
+        </div>
+        <div class="rb-res-row">
+          <span class="rb-res-label">URL</span>
+          <span id="rb-res-url" class="rb-mono rb-res-url"></span>
+        </div>
+
+        <div class="rb-res-tabs">
+          <button class="rb-res-tab active" data-res-tab="body">Body</button>
+          <button class="rb-res-tab" data-res-tab="headers">Headers</button>
+        </div>
+        <pre id="rb-res-body"    class="rb-res-pane active"></pre>
+        <pre id="rb-res-headers" class="rb-res-pane" style="display:none;"></pre>
+      </div>
+
+    </div>
+  </div>
+
 </div>
 
 <script type="module" src="scripts/app.js"></script>

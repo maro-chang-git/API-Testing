@@ -1,5 +1,6 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './swagger-loader.js';
 import { profileEndpoint, matchTemplates, getOperation } from './template-matcher.js';
+import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest } from './request-builder.js';
 
 let templates = [];
 let currentSpec = null;
@@ -7,6 +8,11 @@ let currentProfile = null;
 let matchedCases = [];
 let sortCol = 'id';
 let sortDir = 1;
+
+// Expose request-builder callbacks to inline onclick handlers
+window.__rbToggleAuth = toggleAuthInput;
+window.__rbAddHeader  = () => addHeaderRow();
+window.__rbSend       = sendRequest;
 
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
@@ -20,6 +26,7 @@ async function init() {
 
   populateSwaggerSelect(manifest);
   bindFilters();
+  bindTabs();
   renderTable([]);
   renderSummary([]);
 
@@ -28,6 +35,31 @@ async function init() {
     document.getElementById('f-swagger').value = `${first.id}|${first.file}`;
     await onSwaggerChange(first.file);
   }
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+
+function bindTabs() {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(`tab-${tab}`).classList.add('active');
+    });
+  });
+
+  // Response sub-tabs inside Try It
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('.rb-res-tab');
+    if (!btn) return;
+    const target = btn.dataset.resTab;
+    document.querySelectorAll('.rb-res-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('rb-res-body').style.display    = target === 'body'    ? '' : 'none';
+    document.getElementById('rb-res-headers').style.display = target === 'headers' ? '' : 'none';
+  });
 }
 
 // ── Swagger / Tag / Endpoint cascade ─────────────────────────────────────────
@@ -53,6 +85,7 @@ async function onSwaggerChange(file) {
   setExportVisible(false);
   renderTable([]);
   renderSummary([]);
+  resetRequestBuilder();
   setPlaceholder('Select a Tag and Endpoint to generate test cases');
 }
 
@@ -75,6 +108,7 @@ function onEndpointChange(value) {
     setExportVisible(false);
     renderTable([]);
     renderSummary([]);
+    resetRequestBuilder();
     setPlaceholder('Select a Tag and Endpoint to generate test cases');
     return;
   }
@@ -91,6 +125,7 @@ function onEndpointChange(value) {
 
   setExportVisible(true);
   applyFiltersAndRender();
+  initRequestBuilder(currentProfile, operation, currentSpec);
 }
 
 // ── Filter & render ───────────────────────────────────────────────────────────
@@ -114,6 +149,7 @@ function bindFilters() {
       setExportVisible(false);
       renderTable([]);
       renderSummary([]);
+      resetRequestBuilder();
       setPlaceholder('Select a Swagger to begin');
     }
   });
@@ -126,6 +162,7 @@ function bindFilters() {
     setExportVisible(false);
     renderTable([]);
     renderSummary([]);
+    resetRequestBuilder();
     setPlaceholder('Select an Endpoint to generate test cases');
   });
 
