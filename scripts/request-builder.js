@@ -94,21 +94,29 @@ function clearActiveTcBanner() {
 
 // ── Auth preset from test case ────────────────────────────────────────────────
 
+// Detects cookie-based auth from an endpoint profile's auth_type (the security
+// scheme name, e.g. "cookieAuth" / "session_cookie"). Such endpoints expect
+// credentials in a Cookie header rather than a Bearer Authorization header.
+export function isCookieAuth(authType) {
+  return /cookie/i.test(authType || '');
+}
+
 function applyAuthPreset(tc) {
   const authType  = document.getElementById('rb-auth-type');
   const authValue = document.getElementById('rb-auth-value');
+  const cookieAuth = isCookieAuth(_profile?.auth_type);
 
   if (tc.category === 'auth') {
     if (tc.auth_status === 'missing') {
       authType.value  = 'none';
       authValue.value = '';
     } else if (tc.auth_status === 'invalid') {
-      authType.value  = 'bearer';
-      authValue.value = 'invalid_token_tampered_xyz';
+      authType.value  = cookieAuth ? 'cookie' : 'bearer';
+      authValue.value = cookieAuth ? 'session=invalid_token_tampered_xyz' : 'invalid_token_tampered_xyz';
     } else if (tc.auth_status === 'expired') {
-      authType.value  = 'bearer';
+      authType.value  = cookieAuth ? 'cookie' : 'bearer';
       authValue.value = '';
-      authValue.placeholder = 'Paste an expired token here';
+      authValue.placeholder = cookieAuth ? 'Paste an expired cookie here' : 'Paste an expired token here';
     }
     toggleAuthInput();
     updateAutoAuthHeader();

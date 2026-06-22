@@ -1,4 +1,4 @@
-import { buildExampleFromSchema } from './request-builder.js';
+import { buildExampleFromSchema, isCookieAuth } from './request-builder.js';
 
 /**
  * Builds a Postman Collection v2.1 object from the current endpoint state
@@ -287,12 +287,19 @@ function buildHeaders(tc, profile, hasBody) {
 }
 
 function resolveAuthHeader(tc, profile) {
+  const cookieAuth = isCookieAuth(profile.auth_type);
   if (tc.category === 'auth') {
-    if (tc.auth_status === 'invalid')  return { key: 'Authorization', value: 'Bearer invalid_token_tampered_xyz' };
-    if (tc.auth_status === 'expired')  return { key: 'Authorization', value: 'Bearer {{expired_token}}' };
+    if (tc.auth_status === 'invalid')  return cookieAuth
+      ? { key: 'Cookie',        value: 'session=invalid_token_tampered_xyz' }
+      : { key: 'Authorization', value: 'Bearer invalid_token_tampered_xyz' };
+    if (tc.auth_status === 'expired')  return cookieAuth
+      ? { key: 'Cookie',        value: 'session={{expired_token}}' }
+      : { key: 'Authorization', value: 'Bearer {{expired_token}}' };
     return null; // missing → no header
   }
-  if (profile.auth_required) return { key: 'Authorization', value: 'Bearer {{token}}' };
+  if (profile.auth_required) return cookieAuth
+    ? { key: 'Cookie',        value: 'session={{token}}' }
+    : { key: 'Authorization', value: 'Bearer {{token}}' };
   return null;
 }
 
