@@ -1,5 +1,6 @@
 import { buildExampleFromSchema, getRequestBodySchema, getBaseUrl, isCookieAuth } from './request-builder.js';
 import { getConfig } from './config-loader.js';
+import { getTestBody, BODY_KIND } from './body-builder.js';
 
 /**
  * Builds a Postman Collection v2.1 object from the current endpoint state
@@ -35,7 +36,7 @@ export function exportPostman(profile, operation, spec, testCases) {
 
   const pathParamNames = [...profile.path.matchAll(/\{([^}]+)\}/g)].map(m => m[1]);
 
-  const folders = buildFolders(testCases, profile, method, hasBody, { validBody, literalBody }, queryParams, pathParamNames);
+  const folders = buildFolders(testCases, profile, method, hasBody, { validBody, literalBody }, queryParams, pathParamNames, exampleObj);
 
   // Assemble collection variables, de-duplicating by key. Only the (many) valid
   // body fields are exposed here; failing payloads are hardcoded in their requests.
@@ -107,13 +108,13 @@ const CATEGORY_LABEL = {
   generated:  'Generated (from response)',
 };
 
-function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, pathParamNames) {
+function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, pathParamNames, exampleObj) {
   return CATEGORY_ORDER
     .map(cat => {
       const items = testCases
         .filter(tc => tc.category === cat)
         .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))
-        .map(tc => buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamNames));
+        .map(tc => buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamNames, exampleObj));
       if (!items.length) return null;
       return { name: CATEGORY_LABEL[cat], item: items };
     })
@@ -122,7 +123,7 @@ function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, 
 
 // ── Request item ──────────────────────────────────────────────────────────────
 
-function buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamNames) {
+function buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamNames, exampleObj) {
   // 405 cases send a disallowed method; all other cases use the endpoint's method.
   const reqMethod  = tc.disallowed_method ?? method;
   const reqHasBody = tc.disallowed_method ? ['POST', 'PUT', 'PATCH'].includes(reqMethod) : hasBody;
@@ -130,10 +131,7 @@ function buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamN
   const headers = buildHeaders(tc, profile, reqHasBody);
   const url     = buildUrl(profile, queryParams, pathParamNames);
 
-  // Success cases use the {{field}} collection variables; failure cases keep a
-  // hardcoded literal payload (only a few specific bad values matter per case).
-  const is2xx   = tc.expected_status >= 200 && tc.expected_status < 300;
-  const rawBody = is2xx ? bodies.validBody : bodies.literalBody;
+  const rawBody = selectRawBody(tc, bodies.validBody, exampleObj);
 
   const request = {
     method: reqMethod,
@@ -152,6 +150,17 @@ function buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamN
       script: { exec: buildTestExec(tc), type: 'text/javascript' },
     }],
   };
+}
+
+// Converts a body descriptor from body-builder.js into a raw string for Postman.
+function selectRawBody(tc, validBody, exampleObj) {
+  const { kind, data } = getTestBody(tc, exampleObj);
+  switch (kind) {
+    case BODY_KIND.EMPTY:    return '{}';
+    case BODY_KIND.OBJECT:   return JSON.stringify(data, null, 2);
+    case BODY_KIND.MALFORMED: return data;
+    default:                 return validBody;
+  }
 }
 
 // Build the per-case test blocks. EVERY case gets a real script:

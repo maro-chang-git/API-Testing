@@ -1,6 +1,7 @@
 import { buildExampleFromSchema, getRequestBodySchema, getBaseUrl, isCookieAuth } from './request-builder.js';
 import { CATEGORY_ORDER } from './postman-collection-builder.js';
 import { getConfig } from './config-loader.js';
+import { getTestBody, BODY_KIND } from './body-builder.js';
 
 const CATEGORY_LABEL = {
   happy_path: 'Happy Path',
@@ -26,9 +27,9 @@ export function exportKarate(profile, operation, spec, testCases) {
   const baseUrl    = getBaseUrl(spec);
   const cookieAuth = isCookieAuth(profile.auth_type);
 
-  const bodySchema  = getRequestBodySchema(operation);
-  const exampleObj  = hasBody && bodySchema ? buildExampleFromSchema(bodySchema, spec) : null;
-  const literalBody = exampleObj ? JSON.stringify(exampleObj, null, 2) : null;
+  const bodySchema = getRequestBodySchema(operation);
+  const exampleObj = hasBody && bodySchema ? buildExampleFromSchema(bodySchema, spec) : null;
+  const { bodyVars, validBodyExpr } = buildBodyVars(exampleObj);
 
   const pathParamNames = [...profile.path.matchAll(/\{([^}]+)\}/g)].map(m => m[1]);
 
@@ -53,6 +54,12 @@ export function exportKarate(profile, operation, spec, testCases) {
     const val = cfg.pathParams[n] || `<replace-with-${n}>`;
     lines.push(`    * def ${n} = '${val}'`);
   });
+
+  if (bodyVars.length) {
+    lines.push('');
+    bodyVars.forEach(({ key, value }) => lines.push(`    * def ${key} = ${karateValueLiteral(value)}`));
+    lines.push(`    * def validBody = ${validBodyExpr}`);
+  }
   lines.push('');
 
   CATEGORY_ORDER.forEach(cat => {
@@ -65,7 +72,7 @@ export function exportKarate(profile, operation, spec, testCases) {
     lines.push(`  # ── ${label} ${'─'.repeat(Math.max(0, 68 - label.length))}`);
     lines.push('');
     cases.forEach(tc => {
-      buildScenario(tc, profile, method, hasBody, literalBody, cookieAuth, lines);
+      buildScenario(tc, profile, method, hasBody, validBodyExpr, exampleObj, cookieAuth, lines);
       lines.push('');
     });
   });
@@ -75,7 +82,7 @@ export function exportKarate(profile, operation, spec, testCases) {
 
 // ── Scenario ──────────────────────────────────────────────────────────────────
 
-function buildScenario(tc, profile, method, hasBody, literalBody, cookieAuth, lines) {
+function buildScenario(tc, profile, method, hasBody, validBodyExpr, exampleObj, cookieAuth, lines) {
   const reqMethod  = tc.disallowed_method ?? method;
   const reqHasBody = tc.disallowed_method ? ['POST', 'PUT', 'PATCH'].includes(reqMethod) : hasBody;
 
@@ -89,12 +96,7 @@ function buildScenario(tc, profile, method, hasBody, literalBody, cookieAuth, li
   const authLine = resolveAuthLine(tc, profile, cookieAuth);
   if (authLine) lines.push(`    ${authLine}`);
 
-  if (reqHasBody && literalBody) {
-    lines.push(`    And request`);
-    lines.push(`    """`);
-    literalBody.split('\n').forEach(l => lines.push(`    ${l}`));
-    lines.push(`    """`);
-  }
+  if (reqHasBody) buildKarateBodyLines(tc, validBodyExpr, exampleObj).forEach(l => lines.push(l));
 
   lines.push(`    When method ${reqMethod.toLowerCase()}`);
   lines.push(`    Then status ${tc.expected_status}`);
@@ -171,6 +173,88 @@ function isSimpleKey(k) { return /^[A-Za-z_][A-Za-z0-9_]*$/.test(k); }
 function parseCollectionKey(base) {
   const m = /^([A-Za-z_][A-Za-z0-9_]*)\[0\]$/.exec(base || '');
   return m ? m[1] : null;
+}
+
+// ── Per-scenario request body ─────────────────────────────────────────────────
+
+// Converts a body descriptor from body-builder.js into Karate step lines.
+// OBJECT bodies with very long string values use a JS expression variable
+// (e.g. `('a'.repeat(1001))`) to avoid embedding thousands of characters inline.
+function buildKarateBodyLines(tc, validBodyExpr, exampleObj) {
+  if (!validBodyExpr) return [];
+
+  const { kind, data } = getTestBody(tc, exampleObj);
+
+  switch (kind) {
+    case BODY_KIND.EMPTY:
+      return [`    And request {}`];
+
+    case BODY_KIND.MALFORMED:
+      return [`    And request '${data}'`];
+
+    case BODY_KIND.OBJECT: {
+      const entries    = Object.entries(data);
+      const strEntries = entries.filter(([, v]) => typeof v === 'string');
+      const maxStrLen  = strEntries.length
+        ? Math.max(...strEntries.map(([, v]) => v.length))
+        : 0;
+
+      // Avoid inlining very long strings — express them via a JS variable instead.
+      if (maxStrLen > 200) {
+        const strParts    = strEntries.map(([k]) => `${k}: longStr`);
+        const nonStrParts = entries
+          .filter(([, v]) => typeof v !== 'string')
+          .map(([k, v]) => `${k}: ${karateValueLiteral(v)}`);
+        return [
+          `    * def longStr = ('a'.repeat(${maxStrLen}))`,
+          `    And request ({ ${[...strParts, ...nonStrParts].join(', ')} })`,
+        ];
+      }
+
+      return [`    And request ${karateInlineJson(data)}`];
+    }
+
+    default:
+      return [`    And request validBody`];
+  }
+}
+
+// Serialises a plain object as a single-line Karate JSON literal.
+function karateInlineJson(obj) {
+  const pairs = Object.entries(obj).map(([k, v]) => {
+    const val = typeof v === 'string'
+      ? `'${v.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+      : JSON.stringify(v);
+    return `${k}: ${val}`;
+  });
+  return `{ ${pairs.join(', ')} }`;
+}
+
+// ── Body variables ────────────────────────────────────────────────────────────
+
+// Mirrors postman-collection-builder's buildBodies():
+// Decomposes a plain object into individual field variables and a JS object
+// expression that composes them. Non-object bodies (arrays, scalars) fall back
+// to a single `validBody` def holding the raw value.
+function buildBodyVars(exampleObj) {
+  if (exampleObj == null) return { bodyVars: [], validBodyExpr: null };
+
+  if (typeof exampleObj !== 'object' || Array.isArray(exampleObj)) {
+    return { bodyVars: [], validBodyExpr: JSON.stringify(exampleObj) };
+  }
+
+  const entries  = Object.entries(exampleObj);
+  const bodyVars = entries.map(([key, value]) => ({ key, value }));
+  const fields   = entries.map(([key]) => `${key}: ${key}`).join(', ');
+  return { bodyVars, validBodyExpr: `({ ${fields} })` };
+}
+
+// Format a JS value as a Karate `def` right-hand side.
+function karateValueLiteral(val) {
+  if (val === null)             return 'null';
+  if (typeof val === 'string')  return `'${val.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+  if (typeof val === 'object')  return JSON.stringify(val);
+  return String(val);
 }
 
 // ── Download ──────────────────────────────────────────────────────────────────
