@@ -46,13 +46,14 @@ export function exportPostman(profile, operation, spec, testCases) {
 
 // ── Folders ───────────────────────────────────────────────────────────────────
 
-const CATEGORY_ORDER = ['happy_path', 'positive', 'negative', 'auth', 'boundary'];
+const CATEGORY_ORDER = ['happy_path', 'positive', 'negative', 'auth', 'boundary', 'generated'];
 const CATEGORY_LABEL = {
   happy_path: 'Happy Path',
   positive:   'Positive',
   negative:   'Negative',
   auth:       'Auth',
   boundary:   'Boundary',
+  generated:  'Generated (from response)',
 };
 
 function buildFolders(testCases, profile, method, hasBody, bodyExample, queryParams, pathParamNames) {
@@ -91,50 +92,118 @@ function buildItem(tc, profile, method, hasBody, bodyExample, queryParams, pathP
   };
 }
 
-// Build the Postman test script. Always asserts the status; for generated
-// cases (which carry an `assertion` descriptor) it also asserts the observed
-// field / shape so the test is meaningful, not just a status check.
+// Build the Postman test script. EVERY case gets a real script:
+//   • status code   (always)
+//   • response time (always)
+//   • for generated cases: the observed field / shape assertion
+//   • for template cases: category / status-aware body assertions
+// Blocks are joined with blank lines for readability in Postman's editor.
 function buildTestExec(tc) {
-  const lines = [
-    `pm.test('Status code is ${tc.expected_status}', function () {`,
-    `  pm.response.to.have.status(${tc.expected_status});`,
-    `});`,
+  const status = tc.expected_status;
+  const blocks = [
+    [
+      `pm.test('Status code is ${status}', function () {`,
+      `  pm.response.to.have.status(${status});`,
+      `});`,
+    ],
+    [
+      `pm.test('Response time is below 3000ms', function () {`,
+      `  pm.expect(pm.response.responseTime).to.be.below(3000);`,
+      `});`,
+    ],
   ];
 
-  const a = tc.assertion;
-  if (!a) return lines;
-  const JSON_LINE = '  var json = pm.response.json();';
+  if (tc.assertion) {
+    const block = assertionBlock(tc.assertion);
+    if (block) blocks.push(block);
+  } else {
+    blocks.push(...templateBlocks(tc, status));
+  }
+
+  // Flatten, inserting a blank separator line between blocks.
+  return blocks.flatMap((b, i) => (i === 0 ? b : ['', ...b]));
+}
+
+// Category / status-aware assertions for template-generated cases.
+function templateBlocks(tc, status) {
+  const out = [];
+  const is2xx = status >= 200 && status < 300;
+  const is4xx = status >= 400 && status < 500;
+
+  if (is2xx) {
+    out.push([
+      `pm.test('Response body is valid JSON', function () {`,
+      `  pm.response.to.have.jsonBody();`,
+      `});`,
+    ]);
+    if (tc.method === 'POST' && status === 201) {
+      out.push([
+        `pm.test('Created resource is returned with an id', function () {`,
+        `  var json = pm.response.json();`,
+        `  pm.expect(json).to.be.an('object');`,
+        `  pm.expect(json).to.have.property('id');`,
+        `});`,
+      ]);
+    }
+  } else if (is4xx) {
+    out.push([
+      `pm.test('Error response is valid JSON', function () {`,
+      `  pm.response.to.have.jsonBody();`,
+      `});`,
+    ]);
+    out.push([
+      `pm.test('Error response includes a message', function () {`,
+      `  var json = pm.response.json();`,
+      `  pm.expect(json).to.satisfy(function (b) {`,
+      `    return !!(b && (b.message || b.error || b.error_description || b.detail || b.errors));`,
+      `  });`,
+      `});`,
+    ]);
+  }
+  return out;
+}
+
+// Assertion block for a generated case's observed shape. Returns lines or null.
+function assertionBlock(a) {
+  const J = '  var json = pm.response.json();';
 
   if (a.kind === 'array-root') {
-    lines.push(
+    return [
       `pm.test('Response is an array', function () {`,
-      JSON_LINE,
+      J,
       `  pm.expect(json).to.be.an('array');`,
-      `});`);
-  } else if (a.kind === 'field' && isSimpleKey(a.path)) {
-    lines.push(
+      `});`,
+    ];
+  }
+  if (a.kind === 'field' && isSimpleKey(a.path)) {
+    return [
       `pm.test('Body has field "${a.path}" (${a.jsType})', function () {`,
-      JSON_LINE,
+      J,
       `  pm.expect(json).to.have.property('${a.path}');`,
       ...(a.jsType && a.jsType !== 'null' ? [`  pm.expect(json['${a.path}']).to.be.a('${a.jsType}');`] : []),
-      `});`);
-  } else if (a.kind === 'count' && isSimpleKey(a.path)) {
-    lines.push(
+      `});`,
+    ];
+  }
+  if (a.kind === 'count' && isSimpleKey(a.path)) {
+    return [
       `pm.test('Collection "${a.path}" is an array', function () {`,
-      JSON_LINE,
+      J,
       `  pm.expect(json['${a.path}']).to.be.an('array');`,
-      `});`);
-  } else if (a.kind === 'item-field') {
+      `});`,
+    ];
+  }
+  if (a.kind === 'item-field') {
     const collKey = parseCollectionKey(a.collection);
     if (collKey && isSimpleKey(a.path)) {
-      lines.push(
+      return [
         `pm.test('Items in "${collKey}" have field "${a.path}"', function () {`,
-        JSON_LINE,
+        J,
         `  pm.expect(json['${collKey}'][0]).to.have.property('${a.path}');`,
-        `});`);
+        `});`,
+      ];
     }
   }
-  return lines;
+  return null;
 }
 
 function isSimpleKey(k) { return /^[A-Za-z_][A-Za-z0-9_]*$/.test(k); }
