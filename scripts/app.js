@@ -164,6 +164,19 @@ function onEndpointChange(value) {
   currentOperation = operation;
   matchedCases     = matchTemplates(currentProfile, templates);
 
+  // Annotate TPL-NEG-009 with a disallowed method (first standard method not
+  // defined on this path in the spec) so exports can send the right request.
+  const ALL_HTTP_METHODS = ['DELETE', 'POST', 'PUT', 'PATCH', 'GET'];
+  const allowedOnPath = new Set(
+    Object.keys(currentSpec.paths?.[path] ?? {}).map(k => k.toUpperCase())
+  );
+  const disallowedMethod = ALL_HTTP_METHODS.find(m => !allowedOnPath.has(m)) ?? 'OPTIONS';
+  matchedCases = matchedCases.map(tc =>
+    tc.template_id === 'TPL-NEG-009'
+      ? { ...tc, method: disallowedMethod, disallowed_method: disallowedMethod }
+      : tc
+  );
+
   document.getElementById('api-meta').textContent =
     `${method}  ${path} — ${operation.summary || ''}`;
 

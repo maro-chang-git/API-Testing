@@ -80,6 +80,7 @@ Each template declares an `applies_to` rule. A template is matched only when **a
 | TPL-NEG-006 | negative | not_found | GET/PUT/PATCH/DELETE with path params — non-existent ID |
 | TPL-NEG-007 | negative | invalid | GET/PUT/PATCH/DELETE with path params — invalid ID format |
 | TPL-NEG-008 | negative | duplicate | POST — duplicate resource (409) |
+| TPL-NEG-009 | negative | method_not_allowed | Any endpoint — disallowed HTTP method → 405 |
 | TPL-AUTH-001 | auth | missing | All methods with auth — missing token → 401 |
 | TPL-AUTH-002 | auth | invalid | All methods with auth — tampered token → 401 |
 | TPL-AUTH-003 | auth | expired | All methods with auth — expired token → 401 |

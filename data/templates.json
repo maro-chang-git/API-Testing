@@ -225,6 +225,16 @@
       "notes": "POST the same payload twice — second request should return 409 Conflict"
     },
     {
+      "id": "TPL-NEG-009",
+      "category": "negative",
+      "tag": "method_not_allowed",
+      "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"] },
+      "auth_status": "valid",
+      "purpose": "Return 405 when an HTTP method is not allowed on the endpoint",
+      "expected_status": 405,
+      "notes": "Send a method the endpoint does not support, e.g. DELETE on a read-only resource or PATCH where only GET/POST are allowed"
+    },
+    {
       "id": "TPL-AUTH-001",
       "category": "auth",
       "tag": "missing",

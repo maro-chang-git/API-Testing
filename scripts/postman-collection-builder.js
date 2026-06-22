@@ -121,7 +121,11 @@ function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, 
 // ── Request item ──────────────────────────────────────────────────────────────
 
 function buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamNames) {
-  const headers = buildHeaders(tc, profile, hasBody);
+  // 405 cases send a disallowed method; all other cases use the endpoint's method.
+  const reqMethod  = tc.disallowed_method ?? method;
+  const reqHasBody = tc.disallowed_method ? ['POST', 'PUT', 'PATCH'].includes(reqMethod) : hasBody;
+
+  const headers = buildHeaders(tc, profile, reqHasBody);
   const url     = buildUrl(profile, queryParams, pathParamNames);
 
   // Success cases use the {{field}} collection variables; failure cases keep a
@@ -130,10 +134,10 @@ function buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamN
   const rawBody = is2xx ? bodies.validBody : bodies.literalBody;
 
   const request = {
-    method,
+    method: reqMethod,
     header: headers,
     url,
-    ...(hasBody && rawBody ? {
+    ...(reqHasBody && rawBody ? {
       body: { mode: 'raw', raw: rawBody, options: { raw: { language: 'json' } } },
     } : {}),
   };

@@ -226,7 +226,8 @@ td { padding: 10px 14px; vertical-align: top; }
 .tag-expired   { background: #ffe4e6; color: #be123c; }
 .tag-not_found { background: #f3e8ff; color: #6b21a8; }
 .tag-malformed { background: #ffedd5; color: #9a3412; }
-.tag-duplicate { background: #e0f2fe; color: #075985; }
+.tag-duplicate         { background: #e0f2fe; color: #075985; }
+.tag-method_not_allowed { background: #fef9c3; color: #854d0e; }
 .tag-data-driven { background: #ede9fe; color: #5b21b6; }
 
 /* HTTP status code */
