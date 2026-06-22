@@ -15,9 +15,18 @@ export function exportPostman(profile, operation, spec, testCases) {
   const baseUrl = `${spec.schemes?.[0] ?? 'https'}://${spec.host}${spec.basePath ?? ''}`;
 
   const bodyParam   = (operation.parameters ?? []).find(p => p.in === 'body');
-  const bodyExample = hasBody && bodyParam?.schema
-    ? JSON.stringify(buildExampleFromSchema(bodyParam.schema, spec), null, 2)
+  const exampleObj  = hasBody && bodyParam?.schema
+    ? buildExampleFromSchema(bodyParam.schema, spec)
     : null;
+
+  // Body renderings:
+  //   • validBody   — top-level fields replaced by {{collection variables}}; used by
+  //     cases expected to SUCCEED (2xx). These are many, so centralising them as
+  //     collection variables lets the user update valid data in one place.
+  //   • literalBody — the raw example with hardcoded values; used by cases expected
+  //     to FAIL (negative / auth / SQL-injection). Only a few specific bad values
+  //     matter per case, so they live inline in the request, not as collection vars.
+  const { validBody, literalBody, validVars } = buildBodies(exampleObj);
 
   const queryParams = (operation.parameters ?? [])
     .filter(p => p.in === 'query')
@@ -25,7 +34,18 @@ export function exportPostman(profile, operation, spec, testCases) {
 
   const pathParamNames = [...profile.path.matchAll(/\{([^}]+)\}/g)].map(m => m[1]);
 
-  const folders = buildFolders(testCases, profile, method, hasBody, bodyExample, queryParams, pathParamNames);
+  const folders = buildFolders(testCases, profile, method, hasBody, { validBody, literalBody }, queryParams, pathParamNames);
+
+  // Assemble collection variables, de-duplicating by key. Only the (many) valid
+  // body fields are exposed here; failing payloads are hardcoded in their requests.
+  const variable = [];
+  const seen = new Set();
+  const addVar = v => { if (!seen.has(v.key)) { seen.add(v.key); variable.push(v); } };
+  addVar({ key: 'baseUrl',       value: baseUrl, type: 'string' });
+  addVar({ key: 'token',         value: '',      type: 'string', description: 'Valid bearer token' });
+  addVar({ key: 'expired_token', value: '',      type: 'string', description: 'An expired bearer token for auth tests' });
+  pathParamNames.forEach(n => addVar({ key: n, value: '', type: 'string' }));
+  validVars.forEach(addVar);
 
   const collection = {
     info: {
@@ -33,15 +53,41 @@ export function exportPostman(profile, operation, spec, testCases) {
       schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
     },
     item: folders,
-    variable: [
-      { key: 'baseUrl',       value: baseUrl, type: 'string' },
-      { key: 'token',         value: '',      type: 'string', description: 'Valid bearer token' },
-      { key: 'expired_token', value: '',      type: 'string', description: 'An expired bearer token for auth tests' },
-      ...pathParamNames.map(n => ({ key: n, value: '', type: 'string' })),
-    ],
+    variable,
   };
 
   download(collection, method, profile.path);
+}
+
+// Render a body example two ways: a variabilised valid body ({{field}} collection
+// variables) for success cases, and the raw literal example for failing cases
+// (hardcoded inline, not exposed as collection variables).
+// Only a plain object's top-level fields are variabilised; arrays / scalars /
+// nested values are kept inline (nested objects become a JSON-valued variable).
+function buildBodies(exampleObj) {
+  if (exampleObj == null) return { validBody: null, literalBody: null, validVars: [] };
+
+  const literalBody = JSON.stringify(exampleObj, null, 2);
+  if (typeof exampleObj !== 'object' || Array.isArray(exampleObj)) {
+    return { validBody: literalBody, literalBody, validVars: [] };
+  }
+
+  const validVars = [];
+  const entries = Object.entries(exampleObj);
+  const lines = entries.map(([key, val], i) => {
+    const comma = i < entries.length - 1 ? ',' : '';
+    const isStr = typeof val === 'string';
+    const def = val === null      ? 'null'
+      : typeof val === 'object'   ? JSON.stringify(val)
+      : isStr                     ? val
+      :                             String(val);
+    validVars.push({ key, value: def, type: 'string', description: `Request body field: ${key}` });
+    // Strings are quoted in the JSON; numbers/booleans/objects substitute raw.
+    const ref = isStr ? `"{{${key}}}"` : `{{${key}}}`;
+    return `  ${JSON.stringify(key)}: ${ref}${comma}`;
+  });
+
+  return { validBody: `{\n${lines.join('\n')}\n}`, literalBody, validVars };
 }
 
 // ── Folders ───────────────────────────────────────────────────────────────────
@@ -56,12 +102,12 @@ const CATEGORY_LABEL = {
   generated:  'Generated (from response)',
 };
 
-function buildFolders(testCases, profile, method, hasBody, bodyExample, queryParams, pathParamNames) {
+function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, pathParamNames) {
   return CATEGORY_ORDER
     .map(cat => {
       const items = testCases
         .filter(tc => tc.category === cat)
-        .map(tc => buildItem(tc, profile, method, hasBody, bodyExample, queryParams, pathParamNames));
+        .map(tc => buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamNames));
       if (!items.length) return null;
       return { name: CATEGORY_LABEL[cat], item: items };
     })
@@ -70,15 +116,21 @@ function buildFolders(testCases, profile, method, hasBody, bodyExample, queryPar
 
 // ── Request item ──────────────────────────────────────────────────────────────
 
-function buildItem(tc, profile, method, hasBody, bodyExample, queryParams, pathParamNames) {
+function buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamNames) {
   const headers = buildHeaders(tc, profile, hasBody);
   const url     = buildUrl(profile, queryParams, pathParamNames);
+
+  // Success cases use the {{field}} collection variables; failure cases keep a
+  // hardcoded literal payload (only a few specific bad values matter per case).
+  const is2xx   = tc.expected_status >= 200 && tc.expected_status < 300;
+  const rawBody = is2xx ? bodies.validBody : bodies.literalBody;
+
   const request = {
     method,
     header: headers,
     url,
-    ...(hasBody && bodyExample ? {
-      body: { mode: 'raw', raw: bodyExample, options: { raw: { language: 'json' } } },
+    ...(hasBody && rawBody ? {
+      body: { mode: 'raw', raw: rawBody, options: { raw: { language: 'json' } } },
     } : {}),
   };
 
