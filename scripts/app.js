@@ -1,7 +1,7 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './swagger-loader.js';
 import { profileEndpoint, matchTemplates, getOperation } from './template-matcher.js';
 import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult, setOnResponse } from './request-builder.js';
-import { exportPostman } from './postman-collection-builder.js';
+import { exportPostman, getTestScripts } from './postman-collection-builder.js';
 import { generateTestCasesFromResponse } from './response-test-generator.js';
 
 let templates       = [];
@@ -11,6 +11,7 @@ let currentOperation = null;
 let matchedCases    = [];
 let sortCol = 'id';
 let sortDir = 1;
+let expandedRows = new Set();   // tc ids whose detail panel is open
 
 // ── Results store (persisted per endpoint in localStorage) ─────────────────────
 // resultsStore: { endpointKey → { tcId → { actual_status, elapsed, passed, tested_at } } }
@@ -126,6 +127,7 @@ function populateEndpoints(tag) {
 
 function onEndpointChange(value) {
   document.getElementById('f-result').value = '';   // result filter is endpoint-specific
+  expandedRows.clear();
   if (!value || !currentSpec) {
     results = {};
     currentEndpointKey = null;
@@ -308,6 +310,14 @@ function bindFilters() {
 
   document.getElementById('btn-export').addEventListener('click', exportCases);
   document.getElementById('btn-postman').addEventListener('click', onExportPostman);
+
+  // Swagger-UI-style: click a row to expand/collapse its detail panel.
+  document.getElementById('tbody').addEventListener('click', e => {
+    if (e.target.closest('.run-tc-btn')) return;      // let the Run button act on its own
+    const row = e.target.closest('.tc-main-row');
+    if (!row) return;
+    toggleDetail(row.dataset.tcId);
+  });
 }
 
 function applyFiltersAndRender() {
@@ -394,9 +404,12 @@ function renderTable(rows) {
           ? `<span class="result-badge result-pass">✅ Pass</span><span class="result-actual">${r.actual_status} · ${r.elapsed}ms</span>`
           : `<span class="result-badge result-fail">❌ Fail</span><span class="result-actual">${r.actual_status} · ${r.elapsed}ms</span>`
         : `<span class="result-badge result-untested">—</span>`;
+      const open    = expandedRows.has(tc.id);
+      const rowCls  = [r ? (r.passed ? 'row-pass' : 'row-fail') : '', 'tc-main-row', open ? 'expanded' : ''].filter(Boolean).join(' ');
       return `
-      <tr class="${r ? (r.passed ? 'row-pass' : 'row-fail') : ''}">
+      <tr class="${rowCls}" data-tc-id="${esc(tc.id)}">
         <td>
+          <span class="tc-caret">▸</span>
           <span class="tc-id">${esc(tc.id)}</span>
           <button class="run-tc-btn" onclick="window.__rbRunTc('${esc(tc.id)}')" title="Run in Try It">▶</button>
         </td>
@@ -408,9 +421,64 @@ function renderTable(rows) {
         <td><span class="status ${statusClass(tc.expected_status)}">${esc(tc.expected_status)}</span></td>
         <td>${resBadge}</td>
         <td class="notes-cell">${esc(tc.notes || '—')}</td>
+      </tr>
+      <tr class="tc-detail-row" data-detail-for="${esc(tc.id)}" ${open ? '' : 'style="display:none;"'}>
+        <td colspan="9">${renderTcDetail(tc, r)}</td>
       </tr>`;
     }).join('');
   }
+}
+
+// Expandable detail panel (Swagger-UI style): metadata + the test scripts
+// that this case will run / export.
+function renderTcDetail(tc, r) {
+  const meta = [
+    ['Method',          `<span class="badge method-${esc(tc.method)}">${esc(tc.method)}</span>`],
+    ['Endpoint',        `<span class="mono">${esc(tc.endpoint)}</span>`],
+    ['Category',        `<span class="badge cat-${esc(tc.category)}">${esc(tc.category.replace(/_/g, ' '))}</span>`],
+    ['Tag',             `<span class="badge tag-${esc(tc.tag ?? '')}">${esc(tc.tag ?? '—')}</span>`],
+    ['Expected status', `<span class="status ${statusClass(tc.expected_status)}">${esc(tc.expected_status)}</span>`],
+    ['Auth',            esc(tc.auth_status ?? '—')],
+    ['Template',        esc(tc.template_id ?? '—')],
+    ['Last result',     r ? `${r.passed ? '✅ Pass' : '❌ Fail'} · ${esc(r.actual_status)} · ${esc(r.elapsed)}ms` : '<span class="tc-muted">not run</span>'],
+  ];
+
+  const scripts = getTestScripts(tc);
+  const scriptList = scripts.map(s => `
+    <li class="tc-script">
+      <div class="tc-script-name">✔ ${esc(s.name)}</div>
+      <pre class="tc-script-code">${esc(s.code)}</pre>
+    </li>`).join('');
+
+  return `
+    <div class="tc-detail">
+      <div class="tc-detail-grid">
+        ${meta.map(([k, v]) => `<div class="tc-detail-cell"><span class="tc-detail-k">${k}</span><span class="tc-detail-v">${v}</span></div>`).join('')}
+      </div>
+      <div class="tc-detail-section">
+        <div class="tc-detail-label">Purpose</div>
+        <p class="tc-detail-text">${esc(tc.purpose)}</p>
+      </div>
+      ${tc.notes ? `
+      <div class="tc-detail-section">
+        <div class="tc-detail-label">Notes</div>
+        <p class="tc-detail-text">${esc(tc.notes)}</p>
+      </div>` : ''}
+      <div class="tc-detail-section">
+        <div class="tc-detail-label">Test Scripts <span class="tc-detail-count">${scripts.length}</span></div>
+        <ol class="tc-script-list">${scriptList}</ol>
+      </div>
+    </div>`;
+}
+
+function toggleDetail(id) {
+  const open = !expandedRows.has(id);
+  if (open) expandedRows.add(id); else expandedRows.delete(id);
+
+  const detail = document.querySelector(`.tc-detail-row[data-detail-for="${CSS.escape(id)}"]`);
+  const main   = document.querySelector(`.tc-main-row[data-tc-id="${CSS.escape(id)}"]`);
+  if (detail) detail.style.display = open ? '' : 'none';
+  if (main)   main.classList.toggle('expanded', open);
 }
 
 // ── Export ────────────────────────────────────────────────────────────────────

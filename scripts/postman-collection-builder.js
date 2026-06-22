@@ -92,13 +92,13 @@ function buildItem(tc, profile, method, hasBody, bodyExample, queryParams, pathP
   };
 }
 
-// Build the Postman test script. EVERY case gets a real script:
+// Build the per-case test blocks. EVERY case gets a real script:
 //   • status code   (always)
 //   • response time (always)
 //   • for generated cases: the observed field / shape assertion
 //   • for template cases: category / status-aware body assertions
-// Blocks are joined with blank lines for readability in Postman's editor.
-function buildTestExec(tc) {
+// Each block is an array of lines forming one pm.test(...).
+function buildTestBlocks(tc) {
   const status = tc.expected_status;
   const blocks = [
     [
@@ -119,9 +119,21 @@ function buildTestExec(tc) {
   } else {
     blocks.push(...templateBlocks(tc, status));
   }
+  return blocks;
+}
 
-  // Flatten, inserting a blank separator line between blocks.
-  return blocks.flatMap((b, i) => (i === 0 ? b : ['', ...b]));
+// Flatten the blocks into a Postman exec array (blank line between blocks).
+function buildTestExec(tc) {
+  return buildTestBlocks(tc).flatMap((b, i) => (i === 0 ? b : ['', ...b]));
+}
+
+// Structured view of the same scripts, for display in the UI.
+// Returns [{ name, code }] — one entry per pm.test block.
+export function getTestScripts(tc) {
+  return buildTestBlocks(tc).map(block => {
+    const m = block[0].match(/pm\.test\('([^']*)'/);
+    return { name: m ? m[1] : 'test', code: block.join('\n') };
+  });
 }
 
 // Category / status-aware assertions for template-generated cases.
