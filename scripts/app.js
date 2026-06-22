@@ -1,7 +1,8 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './swagger-loader.js';
 import { profileEndpoint, matchTemplates, getOperation } from './template-matcher.js';
-import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult } from './request-builder.js';
+import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult, setOnResponse } from './request-builder.js';
 import { exportPostman } from './postman-collection-builder.js';
+import { generateTestCasesFromResponse } from './response-test-generator.js';
 
 let templates       = [];
 let currentSpec     = null;
@@ -56,6 +57,7 @@ async function init() {
   populateSwaggerSelect(manifest);
   bindFilters();
   bindTabs();
+  setOnResponse(handleTryItResponse);
   renderTable([]);
   renderSummary([]);
 
@@ -172,6 +174,79 @@ function runTc(tcId) {
 
 window.__rbRunTc = runTc;
 
+// ── Exploratory generation from a live response ───────────────────────────────
+
+// Auto-generation from a successful live response.
+function handleTryItResponse({ status, body }) {
+  if (!currentProfile) return;
+
+  // Mirror the response into the manual "Generate" box so it can be tweaked / re-run.
+  const sampleBody = document.getElementById('rb-sample-body');
+  const sampleStatus = document.getElementById('rb-sample-status');
+  if (sampleBody)   sampleBody.value = body;
+  if (sampleStatus) sampleStatus.value = status;
+
+  const generated = generateTestCasesFromResponse({ status, body, profile: currentProfile });
+  const notice = document.getElementById('rb-gen-notice');
+  if (!notice) return;
+
+  if (!generated.length) {
+    notice.style.display = '';
+    notice.innerHTML = `<span class="rb-gen-icon">🧪</span> No test cases could be generated (response body is not JSON).`;
+    return;
+  }
+  mergeGeneratedCases(generated, notice);
+}
+
+// Manual generation from a pasted sample body — works even when the live call is CORS-blocked.
+window.__rbGenerateFromSample = () => {
+  const notice = document.getElementById('rb-gen-manual-notice');
+  if (!notice) return;
+  if (!currentProfile) {
+    showGenMessage(notice, 'Select an endpoint first.');
+    return;
+  }
+  const body   = document.getElementById('rb-sample-body').value.trim();
+  const status = parseInt(document.getElementById('rb-sample-status').value, 10) || 200;
+  if (!body) {
+    showGenMessage(notice, 'Paste a JSON response body first.');
+    return;
+  }
+  const generated = generateTestCasesFromResponse({ status, body, profile: currentProfile });
+  if (!generated.length) {
+    showGenMessage(notice, 'Could not parse JSON — check the body and try again.');
+    return;
+  }
+  mergeGeneratedCases(generated, notice);
+};
+
+// Merge generated cases into the current endpoint (dedupe by stable id) and report.
+function mergeGeneratedCases(generated, noticeEl) {
+  const existingIds = new Set(matchedCases.map(c => c.id));
+  const fresh = generated.filter(g => !existingIds.has(g.id));
+  matchedCases = matchedCases.concat(fresh);
+  applyFiltersAndRender();
+
+  const total = matchedCases.filter(c => c.generated).length;
+  noticeEl.style.display = '';
+  noticeEl.innerHTML = `
+    <span class="rb-gen-icon">🧪</span>
+    Generated <strong>${fresh.length}</strong> new test case${fresh.length === 1 ? '' : 's'} (${total} total).
+    <button class="rb-gen-view-btn" onclick="window.__viewGenerated()">View in Test Cases →</button>
+  `;
+}
+
+function showGenMessage(noticeEl, msg) {
+  noticeEl.style.display = '';
+  noticeEl.innerHTML = `<span class="rb-gen-icon">🧪</span> ${esc(msg)}`;
+}
+
+window.__viewGenerated = () => {
+  activateTab('testcases');
+  document.getElementById('f-cat').value = 'generated';
+  applyFiltersAndRender();
+};
+
 // ── Filter & render ───────────────────────────────────────────────────────────
 
 function bindFilters() {
@@ -287,6 +362,7 @@ function renderSummary(rows) {
     { num: cats['negative']   || 0,   lbl: 'Negative',   cls: 'cat-negative' },
     { num: cats['auth']       || 0,   lbl: 'Auth',       cls: 'cat-auth' },
     { num: cats['boundary']   || 0,   lbl: 'Boundary',   cls: 'cat-boundary' },
+    ...(cats['generated'] ? [{ num: cats['generated'], lbl: 'Generated', cls: 'cat-generated' }] : []),
   ];
 
   document.getElementById('summary-cards').innerHTML = cards.map(c =>
@@ -385,6 +461,7 @@ function esc(s) {
 function setExportVisible(show) {
   document.getElementById('btn-export').style.display  = show ? '' : 'none';
   document.getElementById('btn-postman').style.display = show ? '' : 'none';
+  document.getElementById('rb-gen-section').style.display = show ? '' : 'none';
 }
 
 function setPlaceholder(msg) {

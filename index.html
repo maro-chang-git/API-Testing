@@ -59,6 +59,7 @@
         <option value="negative">Negative</option>
         <option value="auth">Auth</option>
         <option value="boundary">Boundary</option>
+        <option value="generated">Generated</option>
       </select>
     </div>
     <div class="toolbar-group">
@@ -221,6 +222,10 @@
       <div id="rb-response" style="display:none;">
         <div class="rb-section-title rb-res-title">Response</div>
 
+        <!-- Auto-generated test cases notice -->
+        <div id="rb-gen-notice" class="rb-gen-notice" style="display:none;"></div>
+
+
         <div class="rb-res-row">
           <span class="rb-res-label">Status</span>
           <span id="rb-res-status"></span>
@@ -238,6 +243,26 @@
         <pre id="rb-res-body"    class="rb-res-pane active"></pre>
         <pre id="rb-res-headers" class="rb-res-pane" style="display:none;"></pre>
         <div id="rb-res-schema"  class="rb-res-pane rb-schema-pane" style="display:none;"></div>
+      </div>
+
+      <!-- Exploratory: generate test cases from a response body -->
+      <div class="rb-section" id="rb-gen-section" style="display:none;">
+        <div class="rb-section-title">
+          Generate Test Cases <span class="rb-hint">exploratory</span>
+        </div>
+        <p class="rb-gen-help">
+          A successful response is analysed automatically. Or paste a sample JSON
+          response below and generate cases from it — handy when the live call is
+          blocked by CORS.
+        </p>
+        <textarea id="rb-sample-body" class="rb-body-editor" rows="6" spellcheck="false"
+          placeholder='{ "data": [ { "id": 1, "name": "Example" } ], "total": 1 }'></textarea>
+        <div class="rb-gen-row">
+          <label class="rb-param-name">Status</label>
+          <input type="number" id="rb-sample-status" class="rb-gen-status" value="200" />
+          <button class="rb-add-btn" id="rb-gen-btn" onclick="window.__rbGenerateFromSample()">Generate</button>
+        </div>
+        <div id="rb-gen-manual-notice" class="rb-gen-notice" style="display:none;"></div>
       </div>
 
     </div>

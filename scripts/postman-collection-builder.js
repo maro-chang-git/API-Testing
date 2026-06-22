@@ -86,16 +86,62 @@ function buildItem(tc, profile, method, hasBody, bodyExample, queryParams, pathP
     request,
     event: [{
       listen: 'test',
-      script: {
-        exec: [
-          `pm.test('Status code is ${tc.expected_status}', function () {`,
-          `  pm.response.to.have.status(${tc.expected_status});`,
-          `});`,
-        ],
-        type: 'text/javascript',
-      },
+      script: { exec: buildTestExec(tc), type: 'text/javascript' },
     }],
   };
+}
+
+// Build the Postman test script. Always asserts the status; for generated
+// cases (which carry an `assertion` descriptor) it also asserts the observed
+// field / shape so the test is meaningful, not just a status check.
+function buildTestExec(tc) {
+  const lines = [
+    `pm.test('Status code is ${tc.expected_status}', function () {`,
+    `  pm.response.to.have.status(${tc.expected_status});`,
+    `});`,
+  ];
+
+  const a = tc.assertion;
+  if (!a) return lines;
+  const JSON_LINE = '  var json = pm.response.json();';
+
+  if (a.kind === 'array-root') {
+    lines.push(
+      `pm.test('Response is an array', function () {`,
+      JSON_LINE,
+      `  pm.expect(json).to.be.an('array');`,
+      `});`);
+  } else if (a.kind === 'field' && isSimpleKey(a.path)) {
+    lines.push(
+      `pm.test('Body has field "${a.path}" (${a.jsType})', function () {`,
+      JSON_LINE,
+      `  pm.expect(json).to.have.property('${a.path}');`,
+      ...(a.jsType && a.jsType !== 'null' ? [`  pm.expect(json['${a.path}']).to.be.a('${a.jsType}');`] : []),
+      `});`);
+  } else if (a.kind === 'count' && isSimpleKey(a.path)) {
+    lines.push(
+      `pm.test('Collection "${a.path}" is an array', function () {`,
+      JSON_LINE,
+      `  pm.expect(json['${a.path}']).to.be.an('array');`,
+      `});`);
+  } else if (a.kind === 'item-field') {
+    const collKey = parseCollectionKey(a.collection);
+    if (collKey && isSimpleKey(a.path)) {
+      lines.push(
+        `pm.test('Items in "${collKey}" have field "${a.path}"', function () {`,
+        JSON_LINE,
+        `  pm.expect(json['${collKey}'][0]).to.have.property('${a.path}');`,
+        `});`);
+    }
+  }
+  return lines;
+}
+
+function isSimpleKey(k) { return /^[A-Za-z_][A-Za-z0-9_]*$/.test(k); }
+
+function parseCollectionKey(base) {
+  const m = /^([A-Za-z_][A-Za-z0-9_]*)\[0\]$/.exec(base || '');
+  return m ? m[1] : null;
 }
 
 function buildHeaders(tc, profile, hasBody) {

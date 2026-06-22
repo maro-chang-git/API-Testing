@@ -4,6 +4,9 @@ let _spec      = null;   // full swagger spec (for basePath/host)
 
 let _activeTc         = null;   // test case currently being run
 let _onSaveResult     = null;   // callback(tcId, {actual_status, elapsed, passed})
+let _onResponse       = null;   // callback({status, body}) fired after a successful response
+
+export function setOnResponse(fn) { _onResponse = fn; }
 
 // ── Response tab switcher (runs once at module load; DOM is ready for ES modules) ──
 document.getElementById('rb-response')?.addEventListener('click', e => {
@@ -476,6 +479,9 @@ function showResponse({ status, statusText, headers, body, elapsed, url }) {
   } else {
     hideTcComparison();
   }
+
+  // Let the app derive data-driven test cases from this live response.
+  _onResponse?.({ status, body });
 }
 
 function showTcComparison(tc, actualStatus, elapsed, passed) {
@@ -533,6 +539,8 @@ function clearResponse() {
   const panel = document.getElementById('rb-response');
   panel.style.display = 'none';
   hideTcComparison();
+  const notice = document.getElementById('rb-gen-notice');
+  if (notice) { notice.style.display = 'none'; notice.innerHTML = ''; }
 }
 
 // ── Schema validation ─────────────────────────────────────────────────────────
