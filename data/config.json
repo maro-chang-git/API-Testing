@@ -1,5 +1,5 @@
 {
-  "responseTimeThresholdMs": 3000,
+  "responseTimeThresholdMs": 2000,
   "headers": {
     "accept": "application/json",
     "contentType": "application/json"
