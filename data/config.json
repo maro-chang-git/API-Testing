@@ -1,0 +1,13 @@
+{
+  "responseTimeThresholdMs": 3000,
+  "headers": {
+    "accept": "application/json",
+    "contentType": "application/json"
+  },
+  "auth": {
+    "token": "",
+    "expiredToken": "",
+    "invalidTokenValue": "invalid_token_tampered_xyz"
+  },
+  "pathParams": {}
+}
