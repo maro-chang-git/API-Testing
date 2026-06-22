@@ -45,7 +45,12 @@ export function profileEndpoint(path, method, operation) {
  * Given an endpoint profile and the full templates array,
  * returns the matched templates as concrete test cases.
  *
- * Each generated test case gets a sequential id like TC-001, TC-002, …
+ * Each case gets a STABLE id derived from its template id (see testCaseId) —
+ * never from its position in the matched/filtered list. Results are persisted
+ * as resultsStore[endpointKey][tc.id], so a template that matches an endpoint
+ * must map to the same id every time, regardless of which templates happen to
+ * match or how the table is currently filtered/sorted; otherwise saved results
+ * can no longer be found.
  */
 export function matchTemplates(profile, templates) {
   const matched = templates.filter(tpl => {
@@ -61,8 +66,8 @@ export function matchTemplates(profile, templates) {
     return true;
   });
 
-  return matched.map((tpl, i) => ({
-    id: `TC-${String(i + 1).padStart(3, '0')}`,
+  return matched.map(tpl => ({
+    id: testCaseId(tpl.id),
     template_id: tpl.id,
     method: profile.method,
     endpoint: profile.path,
@@ -75,6 +80,19 @@ export function matchTemplates(profile, templates) {
     expected_status: tpl.expected_status,
     notes: tpl.notes,
   }));
+}
+
+/**
+ * Stable per-endpoint test-case id derived from the template id.
+ *
+ * The persisted result key is endpointKey + this id — i.e. effectively
+ * "template_id + endpoint key" — and a template matches any given endpoint at
+ * most once, so the template id alone makes the id unique within an endpoint.
+ * The "TPL-" prefix is swapped for "TC-" to keep the familiar id style
+ * (e.g. TPL-HP-003 → TC-HP-003).
+ */
+export function testCaseId(templateId) {
+  return 'TC-' + String(templateId).replace(/^TPL-?/i, '');
 }
 
 /**

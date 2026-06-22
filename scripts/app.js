@@ -1,7 +1,7 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './swagger-loader.js';
 import { profileEndpoint, matchTemplates, getOperation } from './template-matcher.js';
 import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult, setOnResponse } from './request-builder.js';
-import { exportPostman, getTestScripts } from './postman-collection-builder.js';
+import { exportPostman, getTestScripts, CATEGORY_ORDER } from './postman-collection-builder.js';
 import { generateTestCasesFromResponse } from './response-test-generator.js';
 
 let templates       = [];
@@ -12,6 +12,17 @@ let matchedCases    = [];
 let sortCol = 'id';
 let sortDir = 1;
 let expandedRows = new Set();   // tc ids whose detail panel is open
+
+// Order test cases by fixed category priority (happy_path → positive → … →
+// generated), then by id within a category. Shared by the table and the JSON
+// export so both read in the same order as the Postman collection's folders.
+const categoryRank = c => {
+  const i = CATEGORY_ORDER.indexOf(c);
+  return i === -1 ? CATEGORY_ORDER.length : i;
+};
+const compareTestCases = (a, b) =>
+  (categoryRank(a.category) - categoryRank(b.category)) ||
+  String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
 
 // ── Results store (persisted per endpoint in localStorage) ─────────────────────
 // resultsStore: { endpointKey → { tcId → { actual_status, elapsed, passed, tested_at } } }
@@ -348,6 +359,11 @@ function applyFiltersAndRender() {
   });
 
   rows = rows.slice().sort((a, b) => {
+    // The id / category columns follow the fixed category priority (not
+    // alphabetical); other columns keep generic value comparison.
+    if (sortCol === 'id' || sortCol === 'category') {
+      return compareTestCases(a, b) * sortDir;
+    }
     const va = String(a[sortCol] ?? '');
     const vb = String(b[sortCol] ?? '');
     return va.localeCompare(vb, undefined, { numeric: true }) * sortDir;
@@ -502,7 +518,7 @@ function exportCases() {
       summary: currentProfile.summary,
       auth_type: currentProfile.auth_type,
     },
-    testcases: matchedCases.map(tc => ({
+    testcases: matchedCases.slice().sort(compareTestCases).map(tc => ({
       ...tc,
       ...(results[tc.id] ? { result: results[tc.id] } : {}),
     })),

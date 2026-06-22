@@ -92,7 +92,10 @@ function buildBodies(exampleObj) {
 
 // ── Folders ───────────────────────────────────────────────────────────────────
 
-const CATEGORY_ORDER = ['happy_path', 'positive', 'negative', 'auth', 'boundary', 'generated'];
+// Fixed category priority used for ordering test cases everywhere (table + JSON
+// export + these Postman folders): happy_path → positive → negative → auth →
+// boundary → generated.
+export const CATEGORY_ORDER = ['happy_path', 'positive', 'negative', 'auth', 'boundary', 'generated'];
 const CATEGORY_LABEL = {
   happy_path: 'Happy Path',
   positive:   'Positive',
@@ -107,6 +110,7 @@ function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, 
     .map(cat => {
       const items = testCases
         .filter(tc => tc.category === cat)
+        .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))
         .map(tc => buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamNames));
       if (!items.length) return null;
       return { name: CATEGORY_LABEL[cat], item: items };
