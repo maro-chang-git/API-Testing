@@ -1,4 +1,5 @@
 import { buildExampleFromSchema, getRequestBodySchema, getBaseUrl, isCookieAuth } from './request-builder.js';
+import { getConfig } from './config-loader.js';
 
 /**
  * Builds a Postman Collection v2.1 object from the current endpoint state
@@ -41,9 +42,10 @@ export function exportPostman(profile, operation, spec, testCases) {
   const variable = [];
   const seen = new Set();
   const addVar = v => { if (!seen.has(v.key)) { seen.add(v.key); variable.push(v); } };
-  addVar({ key: 'baseUrl',       value: baseUrl, type: 'string' });
-  addVar({ key: 'token',         value: '',      type: 'string', description: 'Valid bearer token' });
-  addVar({ key: 'expired_token', value: '',      type: 'string', description: 'An expired bearer token for auth tests' });
+  const cfg = getConfig();
+  addVar({ key: 'baseUrl',       value: baseUrl,              type: 'string' });
+  addVar({ key: 'token',         value: cfg.auth.token,        type: 'string', description: 'Valid bearer token' });
+  addVar({ key: 'expired_token', value: cfg.auth.expiredToken, type: 'string', description: 'An expired bearer token for auth tests' });
   pathParamNames.forEach(n => addVar({ key: n, value: '', type: 'string' }));
   validVars.forEach(addVar);
 
@@ -167,8 +169,8 @@ function buildTestBlocks(tc) {
       `});`,
     ],
     [
-      `pm.test('Response time is below 3000ms', function () {`,
-      `  pm.expect(pm.response.responseTime).to.be.below(3000);`,
+      `pm.test('Response time is below ${getConfig().responseTimeThresholdMs}ms', function () {`,
+      `  pm.expect(pm.response.responseTime).to.be.below(${getConfig().responseTimeThresholdMs});`,
       `});`,
     ],
   ];
@@ -286,20 +288,22 @@ function parseCollectionKey(base) {
 }
 
 function buildHeaders(tc, profile, hasBody) {
+  const cfg = getConfig();
   const authHeader = resolveAuthHeader(tc, profile);
   return [
-    { key: 'Accept', value: 'application/json' },
-    ...(hasBody ? [{ key: 'Content-Type', value: 'application/json' }] : []),
+    { key: 'Accept', value: cfg.headers.accept },
+    ...(hasBody ? [{ key: 'Content-Type', value: cfg.headers.contentType }] : []),
     ...(authHeader ? [authHeader] : []),
   ];
 }
 
 function resolveAuthHeader(tc, profile) {
   const cookieAuth = isCookieAuth(profile.auth_type);
+  const invalid = getConfig().auth.invalidTokenValue;
   if (tc.category === 'auth') {
     if (tc.auth_status === 'invalid')  return cookieAuth
-      ? { key: 'Cookie',        value: 'session=invalid_token_tampered_xyz' }
-      : { key: 'Authorization', value: 'Bearer invalid_token_tampered_xyz' };
+      ? { key: 'Cookie',        value: `session=${invalid}` }
+      : { key: 'Authorization', value: `Bearer ${invalid}` };
     if (tc.auth_status === 'expired')  return cookieAuth
       ? { key: 'Cookie',        value: 'session={{expired_token}}' }
       : { key: 'Authorization', value: 'Bearer {{expired_token}}' };

@@ -1,3 +1,5 @@
+import { getConfig } from './config-loader.js';
+
 let _profile   = null;   // endpoint profile from template-matcher
 let _operation = null;   // raw swagger operation object
 let _spec      = null;   // full swagger spec (for basePath/host)
@@ -112,7 +114,8 @@ function applyAuthPreset(tc) {
       authValue.value = '';
     } else if (tc.auth_status === 'invalid') {
       authType.value  = cookieAuth ? 'cookie' : 'bearer';
-      authValue.value = cookieAuth ? 'session=invalid_token_tampered_xyz' : 'invalid_token_tampered_xyz';
+      const inv = getConfig().auth.invalidTokenValue;
+      authValue.value = cookieAuth ? `session=${inv}` : inv;
     } else if (tc.auth_status === 'expired') {
       authType.value  = cookieAuth ? 'cookie' : 'bearer';
       authValue.value = '';
@@ -287,9 +290,10 @@ function renderDefaultHeaders() {
   // Clear previous default headers; keep any user-added ones
   list.querySelectorAll('[data-default-header]').forEach(el => el.remove());
 
+  const { headers } = getConfig();
   const defaults = [
-    ['Accept', 'application/json'],
-    ...(hasBody ? [['Content-Type', 'application/json']] : []),
+    ['Accept', headers.accept],
+    ...(hasBody ? [['Content-Type', headers.contentType]] : []),
   ];
 
   // Prepend defaults (insert before first child)

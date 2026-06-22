@@ -2,6 +2,8 @@ import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from '.
 import { profileEndpoint, matchTemplates, getOperation } from './template-matcher.js';
 import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult, setOnResponse } from './request-builder.js';
 import { exportPostman, getTestScripts, CATEGORY_ORDER } from './postman-collection-builder.js';
+import { exportKarate } from './karate-feature-builder.js';
+import { loadConfig } from './config-loader.js';
 import { generateTestCasesFromResponse } from './response-test-generator.js';
 
 let templates       = [];
@@ -62,6 +64,7 @@ async function init() {
   const [manifest, tplData] = await Promise.all([
     loadManifest(),
     fetch('data/templates.json').then(r => r.json()),
+    loadConfig(),
   ]);
 
   templates = tplData.templates;
@@ -334,6 +337,7 @@ function bindFilters() {
 
   document.getElementById('btn-export').addEventListener('click', exportCases);
   document.getElementById('btn-postman').addEventListener('click', onExportPostman);
+  document.getElementById('btn-karate').addEventListener('click', onExportKarate);
 
   // Swagger-UI-style: click a row to expand/collapse its detail panel.
   document.getElementById('tbody').addEventListener('click', e => {
@@ -549,6 +553,11 @@ function onExportPostman() {
   exportPostman(currentProfile, currentOperation, currentSpec, matchedCases);
 }
 
+function onExportKarate() {
+  if (!currentProfile || !matchedCases.length || !currentSpec) return;
+  exportKarate(currentProfile, currentOperation, currentSpec, matchedCases);
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function esc(s) {
@@ -558,6 +567,7 @@ function esc(s) {
 function setExportVisible(show) {
   document.getElementById('btn-export').style.display  = show ? '' : 'none';
   document.getElementById('btn-postman').style.display = show ? '' : 'none';
+  document.getElementById('btn-karate').style.display  = show ? '' : 'none';
   document.getElementById('rb-gen-section').style.display = show ? '' : 'none';
 }
 
