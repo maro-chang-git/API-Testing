@@ -1,4 +1,4 @@
-import { buildExampleFromSchema, isCookieAuth } from './request-builder.js';
+import { buildExampleFromSchema, getRequestBodySchema, getBaseUrl, isCookieAuth } from './request-builder.js';
 
 /**
  * Builds a Postman Collection v2.1 object from the current endpoint state
@@ -12,11 +12,11 @@ import { buildExampleFromSchema, isCookieAuth } from './request-builder.js';
 export function exportPostman(profile, operation, spec, testCases) {
   const method  = profile.method;
   const hasBody = ['POST', 'PUT', 'PATCH'].includes(method);
-  const baseUrl = `${spec.schemes?.[0] ?? 'https'}://${spec.host}${spec.basePath ?? ''}`;
+  const baseUrl = getBaseUrl(spec);
 
-  const bodyParam   = (operation.parameters ?? []).find(p => p.in === 'body');
-  const exampleObj  = hasBody && bodyParam?.schema
-    ? buildExampleFromSchema(bodyParam.schema, spec)
+  const bodySchema  = getRequestBodySchema(operation);
+  const exampleObj  = hasBody && bodySchema
+    ? buildExampleFromSchema(bodySchema, spec)
     : null;
 
   // Body renderings:

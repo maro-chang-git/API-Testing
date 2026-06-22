@@ -129,8 +129,21 @@ function resetHeadersList() {
 
 // ── Sections ──────────────────────────────────────────────────────────────────
 
+// Builds the API base URL, supporting both Swagger 2 (schemes/host/basePath)
+// and OpenAPI 3 (servers[].url, with {variable} templates filled from each
+// variable's default).
+export function getBaseUrl(spec) {
+  const server = spec?.servers?.[0];
+  if (server?.url) {
+    return server.url.replace(/\{([^}]+)\}/g, (_, name) =>
+      server.variables?.[name]?.default ?? `{${name}}`);
+  }
+  const scheme = spec?.schemes?.[0] ?? 'https';
+  return `${scheme}://${spec?.host ?? ''}${spec?.basePath ?? ''}`;
+}
+
 function renderEndpointInfo() {
-  const baseUrl = `${_spec.schemes?.[0] ?? 'https'}://${_spec.host}${_spec.basePath ?? ''}`;
+  const baseUrl = getBaseUrl(_spec);
   document.getElementById('rb-base-url').value         = baseUrl;
   document.getElementById('rb-method-badge').textContent  = _profile.method;
   document.getElementById('rb-method-badge').className    = `badge method-${_profile.method}`;
@@ -185,9 +198,9 @@ function renderBodySection() {
   document.getElementById('rb-body-section').style.display = hasBody ? '' : 'none';
   if (!hasBody) return;
 
-  const bodyParam = (_operation.parameters ?? []).find(p => p.in === 'body');
-  const example   = bodyParam?.schema
-    ? buildExampleFromSchema(bodyParam.schema, _spec)
+  const bodySchema = getRequestBodySchema(_operation);
+  const example    = bodySchema
+    ? buildExampleFromSchema(bodySchema, _spec)
     : null;
 
   document.getElementById('rb-body').value = example !== null
@@ -197,15 +210,31 @@ function renderBodySection() {
 
 // ── Schema → example builder ──────────────────────────────────────────────────
 
+// Extracts the request-body schema from an operation, supporting both
+// Swagger 2 (a `parameters` entry with `in: 'body'`) and OpenAPI 3
+// (`requestBody.content[<media-type>].schema`, preferring a JSON media type).
+export function getRequestBodySchema(operation) {
+  const bodyParam = (operation.parameters ?? []).find(p => p.in === 'body');
+  if (bodyParam?.schema) return bodyParam.schema;
+
+  const content = operation.requestBody?.content;
+  if (content) {
+    const types   = Object.keys(content);
+    const jsonKey = types.find(t => t.includes('json')) ?? types[0];
+    return content[jsonKey]?.schema ?? null;
+  }
+  return null;
+}
+
 export function buildExampleFromSchema(schema, spec, _visited = new Set()) {
   if (!schema) return null;
 
   // Resolve $ref
   if (schema.$ref) {
-    const defName = schema.$ref.replace(/^#\/definitions\//, '');
+    const defName = refName(schema.$ref);
     if (_visited.has(defName)) return {};   // break circular refs
     _visited = new Set(_visited).add(defName);
-    return buildExampleFromSchema(spec?.definitions?.[defName] ?? {}, spec, _visited);
+    return buildExampleFromSchema(resolveRef(schema.$ref, spec) ?? {}, spec, _visited);
   }
 
   // Inline example wins
@@ -659,6 +688,17 @@ function schemaMsg(kind, text) {
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
+
+// Local $refs live under #/definitions/ in Swagger 2 and #/components/schemas/
+// in OpenAPI 3. Strip either prefix to get the bare definition name.
+function refName(ref) {
+  return ref.replace(/^#\/definitions\//, '').replace(/^#\/components\/schemas\//, '');
+}
+
+function resolveRef(ref, spec) {
+  const name = refName(ref);
+  return spec?.definitions?.[name] ?? spec?.components?.schemas?.[name] ?? null;
+}
 
 function isJson(str) {
   try { JSON.parse(str); return true; } catch { return false; }
