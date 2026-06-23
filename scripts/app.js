@@ -163,7 +163,7 @@ function onEndpointChange(value) {
   currentEndpointKey = endpointKey(method, path);
   results = resultsStore[currentEndpointKey] ||= {};
 
-  currentProfile   = profileEndpoint(path, method, operation);
+  currentProfile   = profileEndpoint(path, method, operation, currentSpec);
   currentOperation = operation;
   matchedCases     = matchTemplates(currentProfile, templates);
 
@@ -324,13 +324,19 @@ function bindFilters() {
   document.getElementById('f-search').addEventListener('input', applyFiltersAndRender);
 
   document.querySelectorAll('thead th[data-col]').forEach(th => {
+    // Only columns carrying a .sort-icon are sortable (Purpose / Result / Notes
+    // intentionally omit it). Skip the rest so a click can't dereference a
+    // missing icon (TypeError) on those headers.
+    const icon = th.querySelector('.sort-icon');
+    if (!icon) return;
     th.addEventListener('click', () => {
       const col = th.dataset.col;
       sortDir = sortCol === col ? sortDir * -1 : 1;
       sortCol = col;
       document.querySelectorAll('thead th').forEach(t => t.classList.remove('sorted'));
+      document.querySelectorAll('thead .sort-icon').forEach(s => { s.textContent = '↕'; });
       th.classList.add('sorted');
-      th.querySelector('.sort-icon').textContent = sortDir === 1 ? '↑' : '↓';
+      icon.textContent = sortDir === 1 ? '↑' : '↓';
       applyFiltersAndRender();
     });
   });

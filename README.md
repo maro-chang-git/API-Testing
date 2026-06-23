@@ -1,43 +1,80 @@
 # API Test Cases Viewer
 
-An interactive tool that generates test cases for any REST API endpoint by matching a general template library against a selected Swagger spec, and lets you run them directly in the browser.
+An interactive, dependency-free browser tool that generates test cases for any REST API endpoint by matching a general-purpose template library against a selected Swagger / OpenAPI spec — then lets you run the cases directly in the browser and export them to **JSON**, **Postman**, or **Karate**.
+
+No build step, no npm install — it's plain ES modules served as static files.
 
 ## Features
 
-- **Auto-generated test cases** — select an endpoint and the tool matches applicable templates from `data/templates.json`
-- **Try It tab** — configure auth, headers, request body, and send requests directly from the browser
-- **Exploratory testing** — run a test case with one click; the tool pre-fills auth, then shows PASS/FAIL after the response and lets you save the result back to the TC
-- **Result tracking** — filter test cases by Untested / Pass / Fail; results are included in the JSON export
-- **CORS support** — the Base URL field is editable so you can point to a local instance or prefix a CORS proxy
+- **Auto-generated test cases** — select an endpoint and the tool matches applicable templates from `data/templates.json` (happy-path, positive, negative, auth, boundary)
+- **Swagger 2.0 *and* OpenAPI 3.x** — tags, endpoints, request bodies, security, and response schemas are read from either spec version
+- **Try It tab** — configure auth, headers, query/path params, and request body, then send real requests from the browser
+- **Response schema validation** — the response body is checked against the spec's response schema (resolving `$ref`s in both `#/definitions/` and `#/components/schemas/`)
+- **Exploratory testing** — click ▶ on a row to run a case; the tool pre-fills auth, shows PASS/FAIL after the response, and lets you save the result back to the case
+- **Generated cases** — a successful (or pasted) JSON response is analysed to derive data-driven cases (observed fields, types, collection sizes)
+- **Result tracking** — filter by Untested / Pass / Fail; results persist per endpoint in `localStorage` and are included in the JSON export
+- **Three export formats** — JSON, a Postman Collection v2.1 (with `pm.test` scripts), and a Karate `.feature` file
+- **Configurable defaults** — auth tokens, default headers, and the response-time threshold live in `data/config.json`
+- **CORS handling** — the Base URL is editable and a one-click corsproxy.io prefix is provided
 
 ## How it works
 
-1. **Select a Swagger** — loads the API spec from `swaggers/`
+1. **Select a Swagger** — loads the spec from `swaggers/`
 2. **Select a Tag / Group** — filters endpoints to that resource group
 3. **Select an Endpoint** — auto-generates test cases from `data/templates.json`
-4. **Filter** by Category, Tag, Status Code, Result (pass/fail/untested), or free-text search
-5. **Try It** — click the tab to configure and send requests; click ▶ on a row to run a specific test case
-6. **Export JSON** — downloads all test cases (with results) as `api-{method}-{endpoint}-testcases.json`
+4. **Filter** by Category, Tag, Status Code, Result, or free-text; **sort** by clicking the ID / Method / Endpoint / Category / Tag / Expected Status headers
+5. **Expand a row** — click it (Swagger-UI style) to see metadata and the exact test scripts that case will run / export
+6. **Try It** — switch tabs to configure and send requests; click ▶ on a row to run a specific case
+7. **Export** — JSON, Postman, or Karate
 
 ## Project structure
 
 ```
 API Testing/
-├── index.html               # Entry point
+├── index.html                          # Entry point — Test Cases + Try It tabs
 ├── css/
-│   └── styles.css           # All styles
+│   └── styles.css                      # All styles
 ├── scripts/
-│   ├── app.js               # Main app logic (cascade, filter, render, export)
-│   ├── request-builder.js   # Try It tab — auth, headers, body, send, result comparison
-│   ├── swagger-loader.js    # Fetches swagger files, extracts tags & endpoints
-│   └── template-matcher.js  # Profiles an endpoint and matches templates
-├── swaggers/
-│   ├── index.json           # Manifest — list of available swagger files
-│   └── testek.json          # Testek Product Management API spec
+│   ├── app.js                          # Orchestrator: cascade, filter, sort, render, results store, export wiring
+│   ├── swagger-loader.js               # Fetch manifest + specs; extract tags & endpoints (Swagger 2 + OpenAPI 3)
+│   ├── template-matcher.js             # Profile an endpoint, match templates, derive stable TC ids
+│   ├── request-builder.js              # Try It tab — base URL, params, auth, headers, body, send, schema validation
+│   ├── config-loader.js                # Load data/config.json merged over built-in defaults
+│   ├── body-builder.js                 # Shared layer that builds valid / negative request bodies for exporters
+│   ├── postman-collection-builder.js   # Postman v2.1 export + pm.test scripts + category ordering
+│   ├── karate-feature-builder.js       # Karate .feature export
+│   └── response-test-generator.js      # Exploratory: derive cases from a live / pasted response body
 ├── data/
-│   └── templates.json       # General test case template library
+│   ├── templates.json                  # General-purpose test case template library
+│   └── config.json                     # Auth tokens, default headers, response-time threshold, path params
+├── swaggers/
+│   ├── index.json                      # Manifest — list of available specs
+│   ├── testek.json                     # Testek Product Management API (Swagger 2.0)
+│   ├── openapi3.json                   # Minimal OpenAPI 3 example
+│   └── openfigi.json                   # OpenFIGI API (OpenAPI 3, real-world)
 └── README.md
 ```
+
+> `swaggers/*` and `TODO.md` are git-ignored — see `.gitignore`.
+
+## Architecture & data flow
+
+```
+        swagger-loader ─┐
+                        ▼
+  user selections → template-matcher.profileEndpoint() → matchTemplates() → matched cases
+                        │                                                        │
+                        ▼                                                        ▼
+                  request-builder (Try It)                              app.js render / filter / sort
+                        │  send → response                                       │
+                        ▼                                                        ▼
+              response-test-generator                          body-builder ──┬─► postman-collection-builder
+              (generated cases)                                               └─► karate-feature-builder
+```
+
+- **`app.js`** is the single orchestrator. It owns the swagger → tag → endpoint cascade, the filter/sort state, the rendered table, and the per-endpoint results store (persisted in `localStorage` under `apitest.results.v1`).
+- **`body-builder.js`** is a format-agnostic middle layer: it turns a test case + a schema-derived example into a `{ kind, data }` body descriptor (valid / empty / object / malformed). Both the Postman and Karate exporters consume the same descriptor, so negative-body behaviour stays consistent across formats.
+- **`config-loader.js`** loads `data/config.json` once at startup and deep-merges it over built-in defaults; every other module reads it synchronously via `getConfig()`.
 
 ## Template matching logic
 
@@ -48,11 +85,14 @@ When an endpoint is selected, `template-matcher.js` builds a profile from the sw
 | `method` | HTTP method (GET, POST, PUT, PATCH, DELETE) |
 | `endpoint_type` | `list` (GET, no path params) · `detail` (GET, with path params) · `action` (all others) |
 | `has_path_params` | Path contains `{param}` |
-| `has_query_params` | Operation has `in: query` parameters |
-| `has_body` | Operation has `in: body` parameter or `requestBody` |
-| `auth_required` | Operation has a `security` definition |
+| `has_query_params` | Operation has an `in: query` parameter |
+| `has_body` | Operation has an `in: body` parameter (Swagger 2) or a `requestBody` (OpenAPI 3) |
+| `auth_required` | The operation **or the spec root** declares a non-empty `security` requirement. A `{}` entry (anonymous allowed) or an operation-level `security: []` (auth disabled) means **not** required. |
+| `auth_type` | Name of the first security scheme (e.g. `OAuth2`, `ApiKeyAuth`, `cookieAuth`) |
 
 Each template declares an `applies_to` rule. A template is matched only when **all** its conditions satisfy the endpoint profile.
+
+Each matched case gets a **stable id** derived from its template id (`TPL-HP-003` → `TC-HP-003`). Because saved results are keyed by `endpointKey + TC id`, this id must not depend on filter/sort order — see the note in `template-matcher.js`.
 
 ## Template library (`data/templates.json`)
 
@@ -93,37 +133,51 @@ Each template declares an `applies_to` rule. A template is matched only when **a
 | TPL-BND-005 | boundary | valid | POST/PUT/PATCH with body — number at minimum value |
 | TPL-BND-006 | boundary | invalid | POST — extremely large payload |
 
+For the matched **405** case (TPL-NEG-009), `app.js` annotates the case with a concrete disallowed method (the first standard method not defined on that path) so the exports send the right request.
+
 ## Try It tab
 
-The **Try It** tab lets you send real HTTP requests against the selected endpoint.
+The **Try It** tab sends real HTTP requests against the selected endpoint.
 
-- **Base URL** — pre-filled from the swagger spec; edit it to point to a local instance or a CORS proxy
-- **Authentication** — choose Bearer Token, API Key, Cookie, or Basic Auth; the `Authorization` header updates automatically
-- **Headers** — DEFAULT headers (Accept, Content-Type) are added automatically; add custom headers with **+ Add**
-- **Request Body** — pre-filled with an example generated from the swagger schema
-- **Send Request** — fires a `fetch()` and shows status, response headers, and formatted body
+- **Base URL** — pre-filled from the spec (`schemes`/`host`/`basePath` for Swagger 2, `servers[].url` with `{variable}` defaults for OpenAPI 3); edit it to point to a local instance or a CORS proxy
+- **Authentication** — choose Bearer Token, API Key (header or query), Cookie, or Basic Auth; the matching header (or query param) updates automatically
+- **Headers** — default headers (Accept, Content-Type) are added automatically; add custom headers with **+ Add** (later rows override earlier ones)
+- **Request Body** — pre-filled with an example generated from the request schema
+- **Send Request** — fires a `fetch()` and shows status, response headers, formatted body, and a **Schema** tab with validation results
 
 ### CORS
 
-Browser `fetch()` is subject to CORS restrictions. If the API server doesn't send CORS headers, the request is blocked. Options:
+Browser `fetch()` is subject to CORS. If the API server doesn't send CORS headers, the request is blocked. Options:
 
 1. Change the Base URL to a local instance of the API (e.g. `http://localhost:8080`)
-2. Prefix the Base URL with a CORS proxy (e.g. `https://corsproxy.io/?<original-url>`)
+2. Click **🔗 Proxy** to prefix the Base URL with `https://corsproxy.io/?`
 3. Install a browser extension that disables CORS checks (dev use only)
+
+If the live call is blocked, you can still paste a sample JSON response into **Generate Test Cases** to derive generated cases offline.
 
 ## Exploratory testing
 
 Click **▶** on any test case row to run it in Try It:
 
-- Auth settings are pre-configured based on the TC's auth category (missing / invalid / expired token)
-- After the request completes, a PASS/FAIL comparison panel shows expected vs actual status
-- Click **Save Result** to persist the result; the table row updates with a ✅ Pass or ❌ Fail badge
+- Auth settings are pre-configured from the case's auth category (missing / invalid / expired)
+- After the request completes, a PASS/FAIL panel compares expected vs actual status
+- Click **Save Result** to persist it; the row updates with a ✅ Pass or ❌ Fail badge
 - Use the **Result** filter to view only untested, passing, or failing cases
-- Results are included in the JSON export
+- Results survive navigation and page refresh (`localStorage`) and are included in the JSON export
+
+## Exports
+
+| Button | Output | Notes |
+|---|---|---|
+| **Export JSON** | `api-{method}-{endpoint}-testcases.json` | All cases (with saved results), ordered by category |
+| **Export Postman** | `postman-{method}-{endpoint}.json` | Postman Collection v2.1, folders per category, every request carries `pm.test` scripts (status, response-time, body/shape assertions). Valid body fields become collection variables. |
+| **Export Karate** | `karate-{method}-{endpoint}.feature` | One Karate `Feature` with a `Background` (url, tokens, path params, valid body) and a `@category`-tagged `Scenario` per case, including status, `responseTime`, and `match` assertions. |
+
+All three reuse the same category ordering (`happy_path → positive → negative → auth → boundary → generated`) and the same body-builder layer, so the cases line up across formats.
 
 ## Adding a new Swagger
 
-1. Drop the `.json` spec file into `swaggers/`
+1. Drop the `.json` spec (Swagger 2.0 or OpenAPI 3.x) into `swaggers/`
 2. Add an entry to `swaggers/index.json`:
 
 ```json
@@ -140,7 +194,7 @@ Edit `data/templates.json`. Each template follows this schema:
 {
   "id": "TPL-XXX-000",
   "category": "happy_path | positive | negative | auth | boundary",
-  "tag": "valid | invalid | missing | expired | not_found | malformed | duplicate",
+  "tag": "valid | invalid | missing | expired | not_found | malformed | duplicate | method_not_allowed",
   "applies_to": {
     "methods": ["GET", "POST", "PUT", "PATCH", "DELETE"],
     "auth_required": true,
@@ -158,9 +212,28 @@ Edit `data/templates.json`. Each template follows this schema:
 
 All `applies_to` properties except `methods` are optional — omit them to match unconditionally.
 
+## Configuration (`data/config.json`)
+
+Optional. Any key omitted falls back to the built-in default in `config-loader.js`.
+
+```json
+{
+  "responseTimeThresholdMs": 2000,
+  "headers": { "accept": "application/json", "contentType": "application/json" },
+  "auth": {
+    "token": "",
+    "expiredToken": "",
+    "invalidTokenValue": "invalid_token_tampered_xyz"
+  },
+  "pathParams": {}
+}
+```
+
+These values seed the Try It defaults and the Postman/Karate exports (e.g. the `{{token}}` collection variable, the `responseTime <` assertion threshold).
+
 ## Running the viewer
 
-Requires Python 3:
+It's a static site — serve the folder over HTTP. With Python 3:
 
 ```powershell
 & "C:\Program Files\Python314\python.exe" -m http.server 5500

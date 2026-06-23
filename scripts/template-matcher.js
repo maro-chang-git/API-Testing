@@ -8,7 +8,7 @@
  *   endpoint_type: "list" | "detail" | "action"
  * }
  */
-export function profileEndpoint(path, method, operation) {
+export function profileEndpoint(path, method, operation, spec) {
   const params = operation.parameters || [];
 
   const hasPathParams  = /\{[^}]+\}/.test(path);
@@ -16,11 +16,16 @@ export function profileEndpoint(path, method, operation) {
   const hasBody        = params.some(p => p.in === 'body') ||
                          !!operation.requestBody;
 
-  const secDef = operation.security;
-  const authRequired = Array.isArray(secDef) ? secDef.length > 0 : !!secDef;
-  const authType = authRequired && secDef?.[0]
-    ? Object.keys(secDef[0])[0]
-    : null;
+  // Security may be declared on the operation, or globally on the spec (applies
+  // to every operation unless the operation overrides it — including with an
+  // empty `security: []` that disables it). A `{}` entry in the requirement
+  // list means anonymous access is allowed, so auth is only *required* when at
+  // least one requirement exists and none of them is empty.
+  const secDef = operation.security ?? spec?.security;
+  const reqs   = Array.isArray(secDef) ? secDef : (secDef ? [secDef] : []);
+  const authRequired = reqs.length > 0 && reqs.every(r => r && Object.keys(r).length > 0);
+  const firstScheme = reqs.find(r => r && Object.keys(r).length > 0);
+  const authType = firstScheme ? Object.keys(firstScheme)[0] : null;
 
   // Classify GET endpoints: list vs detail
   let endpointType = 'action';

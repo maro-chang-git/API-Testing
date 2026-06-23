@@ -601,7 +601,7 @@ function validateResponseSchema(status, body) {
     return;
   }
 
-  const rawSchema = resDef.schema;
+  const rawSchema = responseSchema(resDef);
   if (!rawSchema) {
     el.innerHTML = schemaMsg('none', `Response ${status} has no schema (status-only response).`);
     return;
@@ -625,21 +625,36 @@ function validateResponseSchema(status, body) {
   }
 }
 
+// A response's schema sits directly on the response object in Swagger 2, but
+// under content[<media-type>].schema in OpenAPI 3 (prefer a JSON media type).
+function responseSchema(resDef) {
+  if (resDef.schema) return resDef.schema;
+  const content = resDef.content;
+  if (content) {
+    const types   = Object.keys(content);
+    const jsonKey = types.find(t => t.includes('json')) ?? types[0];
+    return content[jsonKey]?.schema ?? null;
+  }
+  return null;
+}
+
 function resolveSchemaRef(schema, spec) {
   if (!schema?.$ref) return schema;
-  const name = schema.$ref.replace(/^#\/definitions\//, '');
-  return spec?.definitions?.[name] ?? schema;
+  // resolveRef handles both #/definitions/ (Swagger 2) and
+  // #/components/schemas/ (OpenAPI 3).
+  return resolveRef(schema.$ref, spec) ?? schema;
 }
 
 function validateValue(value, schema, spec, path, errors, visited = new Set()) {
   if (!schema) return;
 
-  // Resolve $ref (with circular ref guard)
+  // Resolve $ref (with circular ref guard) — covers both Swagger 2
+  // (#/definitions/) and OpenAPI 3 (#/components/schemas/).
   if (schema.$ref) {
-    const name = schema.$ref.replace(/^#\/definitions\//, '');
+    const name = refName(schema.$ref);
     if (visited.has(name)) return;
     visited = new Set(visited).add(name);
-    schema = spec?.definitions?.[name];
+    schema = resolveRef(schema.$ref, spec);
     if (!schema) return;
   }
 
