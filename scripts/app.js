@@ -1,5 +1,5 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './swagger-loader.js';
-import { profileEndpoint, matchTemplates, getOperation } from './template-matcher.js';
+import { profileEndpoint, matchTemplates, getOperation, expectedStatuses } from './template-matcher.js';
 import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult, setOnResponse } from './request-builder.js';
 import { exportPostman, getTestScripts, CATEGORY_ORDER } from './postman-collection-builder.js';
 import { exportKarate } from './karate-feature-builder.js';
@@ -370,7 +370,7 @@ function applyFiltersAndRender() {
   let rows = matchedCases.filter(tc => {
     if (cat        && tc.category !== cat)                              return false;
     if (testStatus && tc.tag !== testStatus)                            return false;
-    if (status     && !String(tc.expected_status).startsWith(status))  return false;
+    if (status     && !expectedStatuses(tc.expected_status).some(s => String(s).startsWith(status))) return false;
     if (search     && ![tc.id, tc.endpoint, tc.purpose, tc.notes].join(' ').toLowerCase().includes(search)) return false;
     if (result) {
       const r = results[tc.id];
@@ -386,6 +386,12 @@ function applyFiltersAndRender() {
     // alphabetical); other columns keep generic value comparison.
     if (sortCol === 'id' || sortCol === 'category') {
       return compareTestCases(a, b) * sortDir;
+    }
+    // Sort by the primary (first) status so array-valued cases order sensibly.
+    if (sortCol === 'expected_status') {
+      const sa = expectedStatuses(a.expected_status)[0] ?? 0;
+      const sb = expectedStatuses(b.expected_status)[0] ?? 0;
+      return (sa - sb) * sortDir;
     }
     const va = String(a[sortCol] ?? '');
     const vb = String(b[sortCol] ?? '');
@@ -427,6 +433,13 @@ function statusClass(code) {
   return 's2xx';
 }
 
+// Render one coloured status badge per expected status (cases may list several).
+function renderExpectedStatus(expected) {
+  return expectedStatuses(expected)
+    .map(c => `<span class="status ${statusClass(c)}">${esc(c)}</span>`)
+    .join(' ');
+}
+
 function renderTable(rows) {
   const tbody = document.getElementById('tbody');
   const noRes = document.getElementById('no-results');
@@ -457,7 +470,7 @@ function renderTable(rows) {
         <td><span class="badge cat-${esc(tc.category)}">${esc(tc.category.replace(/_/g, ' '))}</span></td>
         <td><span class="badge tag-${esc(tc.tag ?? '')}">${esc(tc.tag ?? '—')}</span></td>
         <td class="purpose-cell">${esc(tc.purpose)}</td>
-        <td><span class="status ${statusClass(tc.expected_status)}">${esc(tc.expected_status)}</span></td>
+        <td>${renderExpectedStatus(tc.expected_status)}</td>
         <td>${resBadge}</td>
         <td class="notes-cell">${esc(tc.notes || '—')}</td>
       </tr>
@@ -476,7 +489,7 @@ function renderTcDetail(tc, r) {
     ['Endpoint',        `<span class="mono">${esc(tc.endpoint)}</span>`],
     ['Category',        `<span class="badge cat-${esc(tc.category)}">${esc(tc.category.replace(/_/g, ' '))}</span>`],
     ['Tag',             `<span class="badge tag-${esc(tc.tag ?? '')}">${esc(tc.tag ?? '—')}</span>`],
-    ['Expected status', `<span class="status ${statusClass(tc.expected_status)}">${esc(tc.expected_status)}</span>`],
+    ['Expected status', renderExpectedStatus(tc.expected_status)],
     ['Auth',            esc(tc.auth_status ?? '—')],
     ['Template',        esc(tc.template_id ?? '—')],
     ['Last result',     r ? `${r.passed ? '✅ Pass' : '❌ Fail'} · ${esc(r.actual_status)} · ${esc(r.elapsed)}ms` : '<span class="tc-muted">not run</span>'],

@@ -1,4 +1,5 @@
 import { getConfig } from './config-loader.js';
+import { expectedStatuses } from './template-matcher.js';
 
 let _profile   = null;   // endpoint profile from template-matcher
 let _operation = null;   // raw swagger operation object
@@ -84,7 +85,7 @@ function renderActiveTcBanner(tc) {
   banner.innerHTML = `
     <span class="rb-tc-id">${tc.id}</span>
     <span class="rb-tc-purpose">${escHtml(tc.purpose)}</span>
-    <span class="rb-tc-expected">Expected: <strong>${tc.expected_status}</strong></span>
+    <span class="rb-tc-expected">Expected: <strong>${expectedStatuses(tc.expected_status).join(' or ')}</strong></span>
     <button class="rb-clear-tc" onclick="window.__rbClearActiveTc()">✕ Clear</button>
   `;
 }
@@ -513,9 +514,10 @@ function showResponse({ status, statusText, headers, body, elapsed, url }) {
 
   validateResponseSchema(status, body);
 
-  // If a test case is active, show comparison + save button
+  // If a test case is active, show comparison + save button. A case may accept
+  // several statuses (e.g. 200 or 204) — it passes if the actual is any of them.
   if (_activeTc) {
-    const passed = status === _activeTc.expected_status;
+    const passed = expectedStatuses(_activeTc.expected_status).includes(status);
     showTcComparison(_activeTc, status, elapsed, passed);
   } else {
     hideTcComparison();
@@ -534,7 +536,7 @@ function showTcComparison(tc, actualStatus, elapsed, passed) {
       <span class="rb-verdict-icon">${passed ? '✅' : '❌'}</span>
       <span class="rb-verdict-label">${passed ? 'PASS' : 'FAIL'}</span>
       <span class="rb-verdict-detail">
-        Expected <strong>${tc.expected_status}</strong> — Got <strong>${actualStatus}</strong>
+        Expected <strong>${expectedStatuses(tc.expected_status).join(' or ')}</strong> — Got <strong>${actualStatus}</strong>
       </span>
     </div>
     <button class="rb-save-result-btn" onclick="window.__rbSaveResult(${actualStatus}, ${elapsed}, ${passed})">

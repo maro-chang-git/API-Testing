@@ -1,6 +1,7 @@
 import { buildExampleFromSchema, getRequestBodySchema, getBaseUrl, isCookieAuth } from './request-builder.js';
 import { getConfig } from './config-loader.js';
 import { getTestBody, BODY_KIND } from './body-builder.js';
+import { expectedStatuses } from './template-matcher.js';
 
 /**
  * Builds a Postman Collection v2.1 object from the current endpoint state
@@ -170,13 +171,9 @@ function selectRawBody(tc, validBody, exampleObj) {
 //   • for template cases: category / status-aware body assertions
 // Each block is an array of lines forming one pm.test(...).
 function buildTestBlocks(tc) {
-  const status = tc.expected_status;
+  const statuses = expectedStatuses(tc.expected_status);
   const blocks = [
-    [
-      `pm.test('Status code is ${status}', function () {`,
-      `  pm.response.to.have.status(${status});`,
-      `});`,
-    ],
+    statusBlock(statuses),
     [
       `pm.test('Response time is below ${getConfig().responseTimeThresholdMs}ms', function () {`,
       `  pm.expect(pm.response.responseTime).to.be.below(${getConfig().responseTimeThresholdMs});`,
@@ -188,9 +185,26 @@ function buildTestBlocks(tc) {
     const block = assertionBlock(tc.assertion);
     if (block) blocks.push(block);
   } else {
-    blocks.push(...templateBlocks(tc, status));
+    blocks.push(...templateBlocks(tc, statuses));
   }
   return blocks;
+}
+
+// Status assertion: a single status uses pm.response.to.have.status(); a case
+// that accepts several uses chai's oneOf against the actual response code.
+function statusBlock(statuses) {
+  if (statuses.length === 1) {
+    return [
+      `pm.test('Status code is ${statuses[0]}', function () {`,
+      `  pm.response.to.have.status(${statuses[0]});`,
+      `});`,
+    ];
+  }
+  return [
+    `pm.test('Status code is one of ${statuses.join(', ')}', function () {`,
+    `  pm.expect(pm.response.code).to.be.oneOf([${statuses.join(', ')}]);`,
+    `});`,
+  ];
 }
 
 // Flatten the blocks into a Postman exec array (blank line between blocks).
@@ -207,11 +221,14 @@ export function getTestScripts(tc) {
   });
 }
 
-// Category / status-aware assertions for template-generated cases.
-function templateBlocks(tc, status) {
+// Category / status-aware assertions for template-generated cases. The body
+// shape is keyed off the primary (first) status; the POST-created check fires
+// when 201 is among the accepted statuses.
+function templateBlocks(tc, statuses) {
   const out = [];
-  const is2xx = status >= 200 && status < 300;
-  const is4xx = status >= 400 && status < 500;
+  const primary = statuses[0];
+  const is2xx = primary >= 200 && primary < 300;
+  const is4xx = primary >= 400 && primary < 500;
 
   if (is2xx) {
     out.push([
@@ -219,7 +236,7 @@ function templateBlocks(tc, status) {
       `  pm.response.to.have.jsonBody();`,
       `});`,
     ]);
-    if (tc.method === 'POST' && status === 201) {
+    if (tc.method === 'POST' && statuses.includes(201)) {
       out.push([
         `pm.test('Created resource is returned with an id', function () {`,
         `  var json = pm.response.json();`,

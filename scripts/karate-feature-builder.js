@@ -2,6 +2,7 @@ import { buildExampleFromSchema, getRequestBodySchema, getBaseUrl, isCookieAuth 
 import { CATEGORY_ORDER } from './postman-collection-builder.js';
 import { getConfig } from './config-loader.js';
 import { getTestBody, BODY_KIND } from './body-builder.js';
+import { expectedStatuses } from './template-matcher.js';
 
 const CATEGORY_LABEL = {
   happy_path: 'Happy Path',
@@ -99,7 +100,14 @@ function buildScenario(tc, profile, method, hasBody, validBodyExpr, exampleObj, 
   if (reqHasBody) buildKarateBodyLines(tc, validBodyExpr, exampleObj).forEach(l => lines.push(l));
 
   lines.push(`    When method ${reqMethod.toLowerCase()}`);
-  lines.push(`    Then status ${tc.expected_status}`);
+  // Karate's `status` step takes a single code; when a case accepts several,
+  // assert the built-in responseStatus is one of them instead.
+  const statuses = expectedStatuses(tc.expected_status);
+  if (statuses.length === 1) {
+    lines.push(`    Then status ${statuses[0]}`);
+  } else {
+    lines.push(`    Then assert ${statuses.map(s => `responseStatus == ${s}`).join(' || ')}`);
+  }
   lines.push(`    * assert responseTime < ${getConfig().responseTimeThresholdMs}`);
 
   buildKarateAssertions(tc, method, lines);
@@ -136,9 +144,10 @@ function resolveAuthLine(tc, profile, cookieAuth) {
 // ── Assertions ─────────────────────────────────────────────────────────────────
 
 function buildKarateAssertions(tc, method, lines) {
-  const status = tc.expected_status;
-  const is2xx  = status >= 200 && status < 300;
-  const is4xx  = status >= 400 && status < 500;
+  const statuses = expectedStatuses(tc.expected_status);
+  const primary  = statuses[0];
+  const is2xx    = primary >= 200 && primary < 300;
+  const is4xx    = primary >= 400 && primary < 500;
 
   if (tc.assertion) {
     const line = karateAssertLine(tc.assertion);
@@ -148,7 +157,7 @@ function buildKarateAssertions(tc, method, lines) {
 
   if (is2xx) {
     lines.push(`    * match response == '#object'`);
-    if (method === 'POST' && status === 201) {
+    if (method === 'POST' && statuses.includes(201)) {
       lines.push(`    * match response.id == '#notnull'`);
     }
   } else if (is4xx) {

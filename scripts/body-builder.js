@@ -10,6 +10,8 @@
  *   OBJECT    – send the plain object in `data` (type / range / huge-payload tests)
  *   MALFORMED – send the raw string in `data` as-is (not valid JSON)
  */
+import { expectedStatuses } from './template-matcher.js';
+
 export const BODY_KIND = Object.freeze({
   VALID:    'valid',
   EMPTY:    'empty',
@@ -25,7 +27,9 @@ export const BODY_KIND = Object.freeze({
  * @returns {{ kind: string, data?: object|string }}
  */
 export function getTestBody(tc, exampleObj) {
-  const is2xx = tc.expected_status >= 200 && tc.expected_status < 300;
+  // Decide success-vs-negative body from the primary (first) expected status.
+  const primaryStatus = expectedStatuses(tc.expected_status)[0];
+  const is2xx = primaryStatus >= 200 && primaryStatus < 300;
 
   // Success cases, auth cases, and NEG-008 (intentional duplicate) all send
   // the valid body — only the status code or auth header differ.

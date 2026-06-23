@@ -61,8 +61,8 @@
       "applies_to": { "methods": ["DELETE"] },
       "auth_status": "valid",
       "purpose": "Successfully delete an existing resource by valid ID",
-      "expected_status": 200,
-      "notes": "Follow up with GET to confirm the resource is gone (expect 404)"
+      "expected_status": [200, 204],
+      "notes": "APIs return 200 (with body) or 204 (no content); follow up with GET to confirm the resource is gone (expect 404)"
     },
     {
       "id": "TPL-POS-001",
@@ -151,8 +151,8 @@
       "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
       "auth_status": "valid",
       "purpose": "Reject request when required body fields are missing",
-      "expected_status": 400,
-      "notes": "Send empty body {} — expect field-level error messages in response"
+      "expected_status": [400, 422],
+      "notes": "Send empty body {} — expect 400 or 422 with field-level error messages in response"
     },
     {
       "id": "TPL-NEG-002",
@@ -161,8 +161,8 @@
       "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
       "auth_status": "valid",
       "purpose": "Reject request when field values have invalid types",
-      "expected_status": 400,
-      "notes": "e.g. numeric field = 'abc', boolean field = 'yes'"
+      "expected_status": [400, 422],
+      "notes": "e.g. numeric field = 'abc', boolean field = 'yes' — expect 400 or 422"
     },
     {
       "id": "TPL-NEG-003",
@@ -171,8 +171,8 @@
       "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
       "auth_status": "valid",
       "purpose": "Reject request when numeric fields are out of allowed range",
-      "expected_status": 400,
-      "notes": "e.g. price = -1, quantity = 999999999"
+      "expected_status": [400, 422],
+      "notes": "e.g. price = -1, quantity = 999999999 — expect 400 or 422"
     },
     {
       "id": "TPL-NEG-004",
@@ -181,8 +181,8 @@
       "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
       "auth_status": "valid",
       "purpose": "Reject request when string fields exceed maximum allowed length",
-      "expected_status": 400,
-      "notes": "Send a string of 1000+ characters for a name or description field"
+      "expected_status": [400, 422],
+      "notes": "Send a string of 1000+ characters for a name or description field — expect 400 or 422"
     },
     {
       "id": "TPL-NEG-005",
@@ -210,9 +210,9 @@
       "tag": "invalid",
       "applies_to": { "methods": ["GET","PUT","PATCH","DELETE"], "has_path_params": true },
       "auth_status": "valid",
-      "purpose": "Return 400 when the path param ID has an invalid format",
-      "expected_status": 400,
-      "notes": "Use a non-numeric or special-character ID, e.g. 'abc' or '@#$'"
+      "purpose": "Reject the request when the path param ID has an invalid format",
+      "expected_status": [400, 404],
+      "notes": "Use a non-numeric or special-character ID, e.g. 'abc' or '@#$' — APIs return 400 (bad format) or 404 (no such route/resource)"
     },
     {
       "id": "TPL-NEG-008",
@@ -341,8 +341,8 @@
       "applies_to": { "methods": ["POST"] },
       "auth_status": "valid",
       "purpose": "Handle extremely large request payload without crashing",
-      "expected_status": 400,
-      "notes": "Send a body with hundreds of extra unknown fields — expect 400, not 500"
+      "expected_status": [400, 413],
+      "notes": "Send a body with hundreds of extra unknown fields — expect 400 or 413 (Payload Too Large), not 500"
     }
   ]
 }

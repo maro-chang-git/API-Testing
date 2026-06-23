@@ -212,6 +212,24 @@ Edit `data/templates.json`. Each template follows this schema:
 
 All `applies_to` properties except `methods` are optional — omit them to match unconditionally.
 
+### Multiple expected statuses
+
+`expected_status` may be a single number **or an array** of numbers when a case can legitimately pass with any of several codes:
+
+```json
+{ "id": "TPL-HP-006", "expected_status": [200, 204], "...": "DELETE — 200 with body or 204 no-content" }
+{ "id": "TPL-NEG-001", "expected_status": [400, 422], "...": "validation error — 400 or 422" }
+```
+
+This flows through the whole tool consistently:
+
+- **Run / Save Result** — a run passes if the actual status matches **any** listed code
+- **Status Code filter** — a `[400, 422]` case shows under the `4xx` filter
+- **Export Postman** — `pm.expect(pm.response.code).to.be.oneOf([400, 422])` (a single value still uses `pm.response.to.have.status(400)`)
+- **Export Karate** — `Then assert responseStatus == 400 || responseStatus == 422` (a single value still uses `Then status 400`)
+
+The **first** code in the array is the "primary" status, used to decide success-vs-negative request bodies and 2xx/4xx-shaped body assertions.
+
 ## Configuration (`data/config.json`)
 
 Optional. Any key omitted falls back to the built-in default in `config-loader.js`.

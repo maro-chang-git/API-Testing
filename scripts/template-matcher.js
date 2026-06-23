@@ -107,3 +107,17 @@ export function testCaseId(templateId) {
 export function getOperation(spec, path, method) {
   return spec?.paths?.[path]?.[method.toLowerCase()] ?? null;
 }
+
+/**
+ * Normalises a test case's `expected_status` into a non-empty array of numbers.
+ *
+ * `expected_status` may be a single number or an array — a case can legitimately
+ * accept several HTTP statuses (e.g. DELETE → 200 or 204, a validation error →
+ * 400 or 422). The FIRST entry is treated as the "primary" status, used when a
+ * single value is needed (body-kind selection, 2xx/4xx-shaped assertions); the
+ * full list is used wherever a status is compared (pass/fail, export assertions).
+ */
+export function expectedStatuses(expectedStatus) {
+  return (Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus])
+    .filter(s => s !== null && s !== undefined);
+}
