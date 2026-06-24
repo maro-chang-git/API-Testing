@@ -133,7 +133,7 @@ Each matched case gets a **stable id** derived from its template id (`TPL-HP-003
 | TPL-BND-005 | boundary | valid | POST/PUT/PATCH with body — number at minimum value |
 | TPL-BND-006 | boundary | invalid | POST — extremely large payload |
 
-For the matched **405** case (TPL-NEG-009), `app.js` annotates the case with a concrete disallowed method (the first standard method not defined on that path) so the exports send the right request.
+For the matched **405** case (TPL-NEG-009), `app.js` expands it into one case per disallowed method — every standard HTTP method (POST/PUT/PATCH/DELETE/GET) not defined on that path — each with a method-suffixed id (e.g. `TC-NEG-009-POST`) so the exports send the right request. A GET-only path therefore yields four 405 cases (POST, PUT, PATCH, DELETE).
 
 ## Try It tab
 

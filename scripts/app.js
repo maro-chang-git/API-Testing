@@ -167,17 +167,26 @@ function onEndpointChange(value) {
   currentOperation = operation;
   matchedCases     = matchTemplates(currentProfile, templates);
 
-  // Annotate TPL-NEG-009 with a disallowed method (first standard method not
-  // defined on this path in the spec) so exports can send the right request.
-  const ALL_HTTP_METHODS = ['DELETE', 'POST', 'PUT', 'PATCH', 'GET'];
+  // Expand TPL-NEG-009 into one case per disallowed method (every standard HTTP
+  // method not defined on this path in the spec) so each unsupported method is
+  // exercised — e.g. a GET-only path yields POST, PUT, PATCH and DELETE cases.
+  // Each gets a method-suffixed id so its result persists independently.
+  const ALL_HTTP_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE', 'GET'];
   const allowedOnPath = new Set(
     Object.keys(currentSpec.paths?.[path] ?? {}).map(k => k.toUpperCase())
   );
-  const disallowedMethod = ALL_HTTP_METHODS.find(m => !allowedOnPath.has(m)) ?? 'OPTIONS';
-  matchedCases = matchedCases.map(tc =>
+  const disallowedMethods = ALL_HTTP_METHODS.filter(m => !allowedOnPath.has(m));
+  if (!disallowedMethods.length) disallowedMethods.push('OPTIONS');
+  matchedCases = matchedCases.flatMap(tc =>
     tc.template_id === 'TPL-NEG-009'
-      ? { ...tc, method: disallowedMethod, disallowed_method: disallowedMethod }
-      : tc
+      ? disallowedMethods.map(m => ({
+          ...tc,
+          id: `${tc.id}-${m}`,
+          method: m,
+          disallowed_method: m,
+          purpose: `${tc.purpose} (${m})`,
+        }))
+      : [tc]
   );
 
   document.getElementById('api-meta').textContent =
