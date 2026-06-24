@@ -1,5 +1,7 @@
 import { getConfig } from './config-loader.js';
 import { expectedStatuses } from './template-matcher.js';
+import Ajv from './vendor/ajv.js';
+import addFormats from './vendor/ajv-formats.js';
 
 let _profile   = null;   // endpoint profile from template-matcher
 let _operation = null;   // raw swagger operation object
@@ -663,59 +665,108 @@ function resolveSchemaRef(schema, spec) {
   return resolveRef(schema.$ref, spec) ?? schema;
 }
 
-function validateValue(value, schema, spec, path, errors, visited = new Set()) {
+// Validate `value` against an OpenAPI/Swagger `schema` using Ajv (JSON Schema
+// draft-07). The spec's reusable schemas are attached so internal $refs resolve,
+// and Ajv handles $ref cycles natively — so no hand-rolled recursion or
+// visited-set is needed. Ajv's errors are mapped back into the { path, msg }
+// shape the rest of validateResponseSchema() renders.
+function validateValue(value, schema, spec, path, errors) {
   if (!schema) return;
 
-  // Resolve $ref (with circular ref guard) — covers both Swagger 2
-  // (#/definitions/) and OpenAPI 3 (#/components/schemas/).
-  if (schema.$ref) {
-    const name = refName(schema.$ref);
-    if (visited.has(name)) return;
-    visited = new Set(visited).add(name);
-    schema = resolveRef(schema.$ref, spec);
-    if (!schema) return;
-  }
+  // Carry the spec's shared schemas so #/definitions/* (Swagger 2) and
+  // #/components/schemas/* (OpenAPI 3) $refs resolve. ajvSchema() deep-clones
+  // and rewrites OpenAPI's `nullable: true`, so the original spec is untouched.
+  const root = ajvSchema({
+    ...schema,
+    ...(spec?.definitions ? { definitions: spec.definitions } : {}),
+    ...(spec?.components  ? { components:  spec.components  } : {}),
+  });
 
-  const type = schema.type;
-
-  // Type check
-  if (type && value !== null && value !== undefined) {
-    const actual = Array.isArray(value) ? 'array' : typeof value;
-    const expectedJs = type === 'integer' ? 'number' : type;
-    if (actual !== expectedJs) {
-      errors.push({ path, msg: `expected ${type}, got ${actual}` });
-      return; // no point descending into wrong type
-    }
-    if (type === 'integer' && !Number.isInteger(value)) {
-      errors.push({ path, msg: `expected integer, got float` });
-    }
-  }
-
-  if (value === null || value === undefined) return;
-
-  // Object: check required + recurse into properties
-  if ((type === 'object' || schema.properties) && typeof value === 'object' && !Array.isArray(value)) {
-    const required = schema.required ?? [];
-    for (const req of required) {
-      if (!(req in value)) {
-        errors.push({ path: `${path}.${req}`, msg: `required field missing` });
-      }
-    }
-    const props = schema.properties ?? {};
-    for (const [key, propSchema] of Object.entries(props)) {
-      if (key in value) {
-        validateValue(value[key], propSchema, spec, `${path}.${key}`, errors, visited);
-      }
-    }
+  let validate;
+  try {
+    validate = newAjv().compile(root);
+  } catch (e) {
+    errors.push({ path, msg: `schema could not be compiled (${e.message})` });
     return;
   }
 
-  // Array: check items
-  if (type === 'array' && Array.isArray(value) && schema.items) {
-    value.slice(0, 10).forEach((item, i) => {
-      validateValue(item, schema.items, spec, `${path}[${i}]`, errors, visited);
-    });
+  if (validate(value)) return;
+  for (const err of validate.errors ?? []) {
+    errors.push(ajvErrorToEntry(path, err, value));
   }
+}
+
+// Ajv tuned to tolerate OpenAPI-flavoured JSON Schema:
+//   strict:false         — ignore OpenAPI-only keywords (example, xml, discriminator, readOnly…)
+//   allErrors:true       — collect every problem instead of stopping at the first
+//   allowUnionTypes:true — accept the type arrays produced by nullable handling
+// allOf / anyOf / oneOf / additionalProperties are core keywords Ajv enforces by
+// default; addFormats() registers the string/numeric format validators (date-time,
+// email, uri, uuid, int32/int64…) so `format` is checked too. A fresh instance per
+// call keeps validation stateless and avoids Ajv's "schema already exists" cache
+// errors should a spec carry $id/id keywords.
+function newAjv() {
+  const ajv = new Ajv({ strict: false, allErrors: true, allowUnionTypes: true });
+  addFormats(ajv);
+  return ajv;
+}
+
+// Deep-clone a schema while rewriting OpenAPI 3.0 `nullable: true` into the
+// JSON-Schema-native way of allowing null, so Ajv accepts null wherever the spec
+// permits it instead of flagging a type/enum error. Handles both the `type`
+// form ("string" -> ["string","null"]) and the `enum` form (append null).
+function ajvSchema(node) {
+  if (Array.isArray(node)) return node.map(ajvSchema);
+  if (node && typeof node === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(node)) out[k] = ajvSchema(v);
+    if (out.nullable === true) {
+      if (Array.isArray(out.type)) {
+        if (!out.type.includes('null')) out.type = [...out.type, 'null'];
+      } else if (typeof out.type === 'string') {
+        out.type = [out.type, 'null'];
+      }
+      if (Array.isArray(out.enum) && !out.enum.includes(null)) {
+        out.enum = [...out.enum, null];
+      }
+    }
+    delete out.nullable;
+    return out;
+  }
+  return node;
+}
+
+// Map one Ajv error onto the { path, msg } shape the UI lists, rebuilding the
+// dotted/bracketed display path (response.tags[0].name) from Ajv's JSON pointer.
+function ajvErrorToEntry(rootPath, err, rootValue) {
+  let p = rootPath;
+  for (const seg of err.instancePath.split('/').slice(1).map(unescapePtr)) {
+    p += /^\d+$/.test(seg) ? `[${seg}]` : `.${seg}`;
+  }
+  if (err.keyword === 'required') {
+    return { path: `${p}.${err.params.missingProperty}`, msg: 'required field missing' };
+  }
+  if (err.keyword === 'type') {
+    const want = Array.isArray(err.params.type) ? err.params.type.join('|') : err.params.type;
+    return { path: p, msg: `expected ${want}, got ${describeType(valueAtPointer(rootValue, err.instancePath))}` };
+  }
+  return { path: p, msg: err.message ?? 'invalid' };
+}
+
+// Undo JSON Pointer escaping (~1 -> /, ~0 -> ~) for a single path segment.
+function unescapePtr(seg) { return seg.replace(/~1/g, '/').replace(/~0/g, '~'); }
+
+// Walk `obj` to the value Ajv flagged, given its JSON Pointer instancePath.
+function valueAtPointer(obj, pointer) {
+  return pointer.split('/').slice(1).reduce(
+    (o, seg) => (o == null ? o : o[unescapePtr(seg)]), obj);
+}
+
+function describeType(v) {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'array';
+  if (typeof v === 'number' && !Number.isInteger(v)) return 'float';
+  return typeof v;
 }
 
 function schemaMsg(kind, text) {
