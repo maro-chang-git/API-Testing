@@ -484,6 +484,22 @@ function buildHeaders() {
     if (key) headers[key] = val;
   });
 
+  // Browsers refuse to let fetch() set a `Cookie` header (it's a forbidden
+  // header name and is dropped before the request leaves the page). When the
+  // request is routed through our local dev-server proxy, send the cookie as
+  // X-Proxy-Cookie instead; devserver.py renames it back to Cookie before
+  // forwarding to the real API.
+  const baseUrl     = document.getElementById('rb-base-url').value.trim();
+  const proxyPrefix = `${location.origin}/proxy?url=`;
+  if (baseUrl.startsWith(proxyPrefix)) {
+    // Match the cookie header regardless of casing (Cookie / cookie / COOKIE).
+    const cookieKey = Object.keys(headers).find(k => k.toLowerCase() === 'cookie');
+    if (cookieKey) {
+      headers['X-Proxy-Cookie'] = headers[cookieKey];
+      delete headers[cookieKey];
+    }
+  }
+
   // api_key_query auth is not a header — handled in buildUrl()
   return headers;
 }
@@ -560,7 +576,7 @@ function showError(msg, isCors = false) {
   const errBodyEl = document.getElementById('rb-res-body');
   errBodyEl.className = 'rb-res-pane';
   errBodyEl.textContent = isCors
-    ? `CORS policy blocked this request (${msg}).\n\nTo fix:\n  1. Change the Base URL (top-left) to a local instance of the API,\n     e.g. http://localhost:8080/api/v1\n\n  2. Or prefix the Base URL with a CORS proxy:\n     https://corsproxy.io/? + original URL\n\n  3. Or install a browser extension that disables CORS checks\n     (e.g. "CORS Unblock" for Chrome/Firefox — for dev use only).`
+    ? `CORS policy blocked this request (${msg}).\n\nTo fix:\n  1. Change the Base URL (top-left) to a local instance of the API,\n     e.g. http://localhost:8080/api/v1\n\n  2. Or click 🔗 Proxy to route through the local dev-server proxy:\n     ${location.origin}/proxy?url= + original URL\n     (requires serving the page with devserver.py)\n\n  3. Or install a browser extension that disables CORS checks\n     (e.g. "CORS Unblock" for Chrome/Firefox — for dev use only).`
     : msg;
 }
 

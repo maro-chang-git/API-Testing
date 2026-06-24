@@ -15,7 +15,7 @@ No build step, no npm install — it's plain ES modules served as static files.
 - **Result tracking** — filter by Untested / Pass / Fail; results persist per endpoint in `localStorage` and are included in the JSON export
 - **Three export formats** — JSON, a Postman Collection v2.1 (with `pm.test` scripts), and a Karate `.feature` file
 - **Configurable defaults** — auth tokens, default headers, and the response-time threshold live in `data/config.json`
-- **CORS handling** — the Base URL is editable and a one-click corsproxy.io prefix is provided
+- **CORS handling** — the Base URL is editable and a one-click local dev-server proxy (`/proxy?url=`) prefix is provided
 
 ## How it works
 
@@ -150,7 +150,7 @@ The **Try It** tab sends real HTTP requests against the selected endpoint.
 Browser `fetch()` is subject to CORS. If the API server doesn't send CORS headers, the request is blocked. Options:
 
 1. Change the Base URL to a local instance of the API (e.g. `http://localhost:8080`)
-2. Click **🔗 Proxy** to prefix the Base URL with `https://corsproxy.io/?`
+2. Click **🔗 Proxy** to prefix the Base URL with the local dev-server proxy (`/proxy?url=`). The server forwards the request server-side, so CORS never applies. Because browsers won't let `fetch()` set a `Cookie` header, the Try It tab sends it as `X-Proxy-Cookie` and the proxy renames it back to `Cookie` before forwarding. This requires serving the page with `devserver.py` (below).
 3. Install a browser extension that disables CORS checks (dev use only)
 
 If the live call is blocked, you can still paste a sample JSON response into **Generate Test Cases** to derive generated cases offline.
@@ -251,10 +251,15 @@ These values seed the Try It defaults and the Postman/Karate exports (e.g. the `
 
 ## Running the viewer
 
-It's a static site — serve the folder over HTTP. With Python 3:
+It's a static site — serve the folder over HTTP. Use `devserver.py`, which serves
+the files **and** exposes the `/proxy?url=` CORS proxy used by the **🔗 Proxy** button:
 
 ```powershell
-& "C:\Program Files\Python314\python.exe" -m http.server 5500
+$env:PORT = 5500
+& "C:\Program Files\Python314\python.exe" .claude\devserver.py
 ```
 
 Open **http://localhost:5500/index.html** in your browser. Press `Ctrl+C` to stop.
+
+> Plain `python -m http.server 5500` also serves the page, but the **🔗 Proxy**
+> button won't work without `devserver.py` providing the `/proxy` endpoint.

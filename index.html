@@ -151,13 +151,13 @@
           <input type="text" id="rb-base-url" class="rb-base-url-input" placeholder="https://…" spellcheck="false" />
           <button class="rb-proxy-btn" onclick="
             const inp = document.getElementById('rb-base-url');
-            const proxy = 'https://corsproxy.io/?';
+            const proxy = location.origin + '/proxy?url=';
             if (!inp.value.startsWith(proxy)) inp.value = proxy + inp.value;
-          " title="Prefix with corsproxy.io to bypass CORS">🔗 Proxy</button>
+          " title="Route through the local dev-server proxy to bypass CORS">🔗 Proxy</button>
         </div>
         <div class="rb-cors-hint">
-          ⚠ CORS: if requests are blocked, change Base URL to a local instance or prefix with a
-          <a href="https://corsproxy.io/" target="_blank" rel="noopener">CORS proxy</a>.
+          ⚠ CORS: if requests are blocked, change Base URL to a local instance or click
+          <strong>🔗 Proxy</strong> to route through the local dev-server proxy (run with devserver.py).
         </div>
       </div>
 
