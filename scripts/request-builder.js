@@ -1,7 +1,7 @@
 import { getConfig } from './config-loader.js';
 import { expectedStatuses } from './template-matcher.js';
-import Ajv from './vendor/ajv.js';
-import addFormats from './vendor/ajv-formats.js';
+import Ajv from './vendor/ajv/ajv.js';
+import addFormats from './vendor/ajv/ajv-formats.js';
 
 let _profile   = null;   // endpoint profile from template-matcher
 let _operation = null;   // raw swagger operation object
