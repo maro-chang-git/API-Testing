@@ -187,6 +187,14 @@ function buildTestBlocks(tc) {
   } else {
     blocks.push(...templateBlocks(tc, statuses));
   }
+
+  // Folded-in assertions derived from an observed response body ride along as
+  // extra checks on their host case (e.g. a 200 body's field/shape assertions
+  // on the happy-path GET case).
+  for (const a of tc.generatedAssertions ?? []) {
+    const block = assertionBlock(a);
+    if (block) blocks.push(block);
+  }
   return blocks;
 }
 

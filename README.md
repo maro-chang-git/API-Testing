@@ -11,7 +11,7 @@ No build step, no npm install — it's plain ES modules served as static files.
 - **Try It tab** — configure auth, headers, query/path params, and request body, then send real requests from the browser
 - **Response schema validation** — the response body is checked against the spec's response schema (resolving `$ref`s in both `#/definitions/` and `#/components/schemas/`)
 - **Exploratory testing** — click ▶ on a row to run a case; the tool pre-fills auth, shows PASS/FAIL after the response, and lets you save the result back to the case
-- **Generated cases** — a successful (or pasted) JSON response is analysed to derive data-driven cases (observed fields, types, collection sizes)
+- **Generated cases** — a successful (or pasted) JSON response is analysed to derive data-driven assertions (observed fields, types, collection sizes); these are **folded into the matching case as extra test scripts** (e.g. a 200 body's field/shape checks land on the happy-path GET case), so they run and export inside that case rather than as separate rows
 - **Result tracking** — filter by Untested / Pass / Fail; results persist per endpoint in `localStorage` and are included in the JSON export
 - **Three export formats** — JSON, a Postman Collection v2.1 (with `pm.test` scripts), and a Karate `.feature` file
 - **Configurable defaults** — auth tokens, default headers, and the response-time threshold live in `data/config.json`
@@ -69,7 +69,8 @@ API Testing/
                         │  send → response                                       │
                         ▼                                                        ▼
               response-test-generator                          body-builder ──┬─► postman-collection-builder
-              (generated cases)                                               └─► karate-feature-builder
+              (assertions folded into                                         └─► karate-feature-builder
+               the matching case)
 ```
 
 - **`app.js`** is the single orchestrator. It owns the swagger → tag → endpoint cascade, the filter/sort state, the rendered table, and the per-endpoint results store (persisted in `localStorage` under `apitest.results.v1`).

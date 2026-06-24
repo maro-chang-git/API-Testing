@@ -233,7 +233,7 @@ function handleTryItResponse({ status, body }) {
     notice.innerHTML = `<span class="rb-gen-icon">🧪</span> No test cases could be generated (response body is not JSON).`;
     return;
   }
-  mergeGeneratedCases(generated, notice);
+  foldGeneratedCases(generated, notice);
 }
 
 // Manual generation from a pasted sample body — works even when the live call is CORS-blocked.
@@ -255,21 +255,64 @@ window.__rbGenerateFromSample = () => {
     showGenMessage(notice, 'Could not parse JSON — check the body and try again.');
     return;
   }
-  mergeGeneratedCases(generated, notice);
+  foldGeneratedCases(generated, notice);
 };
 
-// Merge generated cases into the current endpoint (dedupe by stable id) and report.
-function mergeGeneratedCases(generated, noticeEl) {
-  const existingIds = new Set(matchedCases.map(c => c.id));
-  const fresh = generated.filter(g => !existingIds.has(g.id));
-  matchedCases = matchedCases.concat(fresh);
+// Fold generated cases into the current endpoint. Each generated case carries an
+// observed-shape `assertion`; rather than listing it as its own row, we attach it
+// as an extra test script on the best-matching template case — the case whose
+// expected status matches the analysed response (e.g. a 200 body's field/shape
+// checks land on the GET-200 happy case). The status-confirmation assertion is
+// dropped (it just restates the host case's own status block); a generated case
+// that has no scriptable assertion (e.g. a "fetch by observed id" follow-up) or
+// that matches no template case is kept as a standalone row.
+function foldGeneratedCases(generated, noticeEl) {
+  let attached = 0;
+  const orphans = [];
+
+  generated.forEach(g => {
+    if (g.assertion?.kind === 'status') return;             // redundant with the host status block
+
+    const target = g.assertion
+      ? findCaseForStatus(expectedStatuses(g.expected_status)[0])
+      : null;
+
+    if (target) {
+      const list = (target.generatedAssertions ||= []);
+      const sig  = JSON.stringify(g.assertion);
+      if (!list.some(a => JSON.stringify(a) === sig)) { list.push(g.assertion); attached++; }
+    } else {
+      orphans.push(g);                                      // no scriptable assertion, or nothing to host it
+    }
+  });
+
+  const existingIds  = new Set(matchedCases.map(c => c.id));
+  const freshOrphans = orphans.filter(g => !existingIds.has(g.id));
+  matchedCases = matchedCases.concat(freshOrphans);
   applyFiltersAndRender();
 
-  const total = matchedCases.filter(c => c.generated).length;
+  reportGenerated(noticeEl, attached, freshOrphans.length);
+}
+
+// Best template case to host a generated assertion: among non-generated cases
+// whose expected status includes `status`, the highest-priority one (happy_path
+// first, via the shared category ordering used by the table and exports).
+function findCaseForStatus(status) {
+  const candidates = matchedCases.filter(tc =>
+    !tc.generated && expectedStatuses(tc.expected_status).includes(status)
+  );
+  return candidates.sort(compareTestCases)[0] || null;
+}
+
+function reportGenerated(noticeEl, attached, orphanCount) {
+  const parts = [];
+  if (attached)    parts.push(`added <strong>${attached}</strong> assertion script${attached === 1 ? '' : 's'} to matching cases`);
+  if (orphanCount) parts.push(`<strong>${orphanCount}</strong> standalone case${orphanCount === 1 ? '' : 's'}`);
+  const summary = parts.length ? parts.join(' and ') : 'no new assertions (already present)';
   noticeEl.style.display = '';
   noticeEl.innerHTML = `
     <span class="rb-gen-icon">🧪</span>
-    Generated <strong>${fresh.length}</strong> new test case${fresh.length === 1 ? '' : 's'} (${total} total).
+    Generated: ${summary}.
     <button class="rb-gen-view-btn" onclick="window.__viewGenerated()">View in Test Cases →</button>
   `;
 }
@@ -279,9 +322,13 @@ function showGenMessage(noticeEl, msg) {
   noticeEl.innerHTML = `<span class="rb-gen-icon">🧪</span> ${esc(msg)}`;
 }
 
+// Jump to the Test Cases tab and reveal the folded scripts: clear the category
+// filter (folded assertions live on the happy/positive cases, not a "generated"
+// bucket) and auto-expand every case that received them.
 window.__viewGenerated = () => {
   activateTab('testcases');
-  document.getElementById('f-cat').value = 'generated';
+  document.getElementById('f-cat').value = '';
+  matchedCases.forEach(tc => { if (tc.generatedAssertions?.length) expandedRows.add(tc.id); });
   applyFiltersAndRender();
 };
 

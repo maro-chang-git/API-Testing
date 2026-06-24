@@ -148,21 +148,27 @@ function buildKarateAssertions(tc, method, lines) {
   const primary  = statuses[0];
   const is2xx    = primary >= 200 && primary < 300;
   const is4xx    = primary >= 400 && primary < 500;
+  const folded   = tc.generatedAssertions ?? [];
 
   if (tc.assertion) {
     const line = karateAssertLine(tc.assertion);
     if (line) lines.push(`    ${line}`);
-    return;
-  }
-
-  if (is2xx) {
-    lines.push(`    * match response == '#object'`);
+  } else if (is2xx) {
+    // A folded array-root assertion will assert `response == '#array'`; skip the
+    // generic object match so the scenario doesn't contradict itself.
+    if (!folded.some(a => a.kind === 'array-root')) lines.push(`    * match response == '#object'`);
     if (method === 'POST' && statuses.includes(201)) {
       lines.push(`    * match response.id == '#notnull'`);
     }
   } else if (is4xx) {
     lines.push(`    * match response == '#object'`);
     lines.push(`    * assert response.message != null || response.error != null || response.detail != null`);
+  }
+
+  // Folded-in assertions derived from an observed response body.
+  for (const a of folded) {
+    const line = karateAssertLine(a);
+    if (line) lines.push(`    ${line}`);
   }
 }
 

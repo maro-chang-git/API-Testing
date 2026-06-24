@@ -6,8 +6,10 @@
  * here we learn from real data — observed fields, types, and collection sizes.
  *
  * Returns an array of test-case objects shaped like template-matcher output,
- * each tagged `generated: true` and carrying an `assertion` descriptor so the
- * Postman exporter can emit a real check (not just a status assertion).
+ * each tagged `generated: true` and carrying an `assertion` descriptor. app.js
+ * folds those assertions into the matching template case (e.g. the happy-path
+ * case for the response's status) as extra scripts, so the exporters emit them
+ * as real checks inside that case rather than as standalone requests.
  */
 export function generateTestCasesFromResponse({ status, body, profile }) {
   let parsed;
