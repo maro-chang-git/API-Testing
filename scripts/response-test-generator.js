@@ -128,12 +128,17 @@ function preview(v) {
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 // Small deterministic hash so the same observed assertion keeps the same id
-// across re-sends (lets the results store and dedupe line up).
+// across re-sends (lets the results store and dedupe line up). Uses two seeded
+// 32-bit accumulators combined into a 53-bit value (cyrb53) — far wider than a
+// single 32-bit hash, so collisions across large response sets are negligible.
 function hashId(str) {
-  let h = 0;
+  let h1 = 0xdeadbeef ^ str.length, h2 = 0x41c6ce57 ^ str.length;
   for (let i = 0; i < str.length; i++) {
-    h = (h << 5) - h + str.charCodeAt(i);
-    h |= 0;
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
   }
-  return (h >>> 0).toString(36);
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
