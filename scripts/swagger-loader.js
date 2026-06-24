@@ -1,3 +1,5 @@
+import SwaggerParser from './vendor/swagger-parser.js';
+
 /**
  * Fetches the list of available swagger files from swaggers/index.json.
  * Returns: [{ id, file, title }]
@@ -8,12 +10,27 @@ export async function loadManifest() {
 }
 
 /**
- * Fetches and parses a swagger spec by filename.
- * Returns the raw swagger JSON object.
+ * Fetches a swagger spec by filename and dereferences it ONCE at load time.
+ *
+ * SwaggerParser.dereference inlines every $ref it can — internal, multi-file,
+ * and external URL — so the rest of the app sees plain schemas and never has to
+ * resolve refs itself. `circular: 'ignore'` leaves genuinely circular refs in
+ * place as { $ref } (instead of building JS object cycles), which keeps the
+ * result safe to deep-clone and recurse over downstream.
+ *
+ * The main document is fetched here (preserving existing behaviour); the fetched
+ * object plus its URL are handed to the parser so external relative $refs resolve
+ * against `swaggers/`. If dereferencing fails, we fall back to the raw spec.
  */
 export async function loadSwagger(file) {
-  const res = await fetch(`swaggers/${file}`);
-  return res.json();
+  const url = `swaggers/${file}`;
+  const raw = await (await fetch(url)).json();
+  try {
+    return await SwaggerParser.dereference(url, raw, { dereference: { circular: 'ignore' } });
+  } catch (err) {
+    console.warn(`SwaggerParser.dereference failed for ${file}; using raw spec.`, err);
+    return raw;
+  }
 }
 
 // Valid HTTP operation keys on a Swagger/OpenAPI path-item object.

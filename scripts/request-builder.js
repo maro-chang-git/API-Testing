@@ -232,16 +232,15 @@ export function getRequestBodySchema(operation) {
   return null;
 }
 
-export function buildExampleFromSchema(schema, spec, _visited = new Set()) {
+// The spec is dereferenced once at load time (SwaggerParser, circular:'ignore'),
+// so schemas arrive fully inlined. The `spec` arg is kept for call-site
+// compatibility but no longer used for resolution.
+export function buildExampleFromSchema(schema) {
   if (!schema) return null;
 
-  // Resolve $ref
-  if (schema.$ref) {
-    const defName = refName(schema.$ref);
-    if (_visited.has(defName)) return {};   // break circular refs
-    _visited = new Set(_visited).add(defName);
-    return buildExampleFromSchema(resolveRef(schema.$ref, spec) ?? {}, spec, _visited);
-  }
+  // Any $ref still present is a circular one SwaggerParser left in place — stop
+  // here to avoid infinite recursion.
+  if (schema.$ref) return {};
 
   // Inline example wins
   if (schema.example !== undefined) return schema.example;
@@ -252,13 +251,13 @@ export function buildExampleFromSchema(schema, spec, _visited = new Set()) {
     const obj = {};
     const props = schema.properties ?? {};
     for (const [key, propSchema] of Object.entries(props)) {
-      obj[key] = buildExampleFromSchema(propSchema, spec, _visited);
+      obj[key] = buildExampleFromSchema(propSchema);
     }
     return obj;
   }
 
   if (type === 'array') {
-    const item = schema.items ? buildExampleFromSchema(schema.items, spec, _visited) : 'string';
+    const item = schema.items ? buildExampleFromSchema(schema.items) : 'string';
     return [item];
   }
 
@@ -633,9 +632,11 @@ function validateResponseSchema(status, body) {
     return;
   }
 
-  const schema = resolveSchemaRef(rawSchema, _spec);
+  // rawSchema is already dereferenced (load-time SwaggerParser pass); pass it
+  // straight to Ajv, which still resolves any remaining circular $ref via the
+  // spec's definitions/components.
   const errors = [];
-  validateValue(parsed, schema, _spec, 'response', errors);
+  validateValue(parsed, rawSchema, _spec, 'response', errors);
 
   if (errors.length === 0) {
     el.innerHTML = schemaMsg('pass', `Schema valid — all fields match the spec for status ${status}.`);
@@ -656,13 +657,6 @@ function responseSchema(resDef) {
     return content[jsonKey]?.schema ?? null;
   }
   return null;
-}
-
-function resolveSchemaRef(schema, spec) {
-  if (!schema?.$ref) return schema;
-  // resolveRef handles both #/definitions/ (Swagger 2) and
-  // #/components/schemas/ (OpenAPI 3).
-  return resolveRef(schema.$ref, spec) ?? schema;
 }
 
 // Validate `value` against an OpenAPI/Swagger `schema` using Ajv (JSON Schema
@@ -776,17 +770,6 @@ function schemaMsg(kind, text) {
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
-
-// Local $refs live under #/definitions/ in Swagger 2 and #/components/schemas/
-// in OpenAPI 3. Strip either prefix to get the bare definition name.
-function refName(ref) {
-  return ref.replace(/^#\/definitions\//, '').replace(/^#\/components\/schemas\//, '');
-}
-
-function resolveRef(ref, spec) {
-  const name = refName(ref);
-  return spec?.definitions?.[name] ?? spec?.components?.schemas?.[name] ?? null;
-}
 
 function isJson(str) {
   try { JSON.parse(str); return true; } catch { return false; }
