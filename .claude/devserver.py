@@ -13,11 +13,18 @@ sends it as `X-Proxy-Cookie`; the proxy renames it back to `Cookie` before
 forwarding to the target.
 """
 import os
+import json
 import http.server
 import urllib.request
 import urllib.error
+import urllib.parse
 
 PROXY_PREFIX = '/proxy?url='
+SAVE_PREFIX = '/save?'
+
+# Browser exports and the per-swagger specs file are written here via POST /save.
+# Writes are confined to this directory — see save() for the containment check.
+OUTPUT_ROOT = os.path.realpath(os.path.join(os.getcwd(), 'output'))
 
 # Request headers the proxy must not forward: hop-by-hop / connection-specific
 # ones, plus those it sets itself (Host, Content-Length).
@@ -46,7 +53,12 @@ class DevHandler(http.server.SimpleHTTPRequestHandler):
         else:
             super().do_HEAD()
 
-    def do_POST(self):    self.proxy()
+    def do_POST(self):
+        if self.path.startswith(SAVE_PREFIX):
+            self.save()
+        else:
+            self.proxy()
+
     def do_PUT(self):     self.proxy()
     def do_PATCH(self):   self.proxy()
     def do_DELETE(self):  self.proxy()
@@ -97,6 +109,44 @@ class DevHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    # ── File writer (POST /save?path=output/…) ──────────────────────────────
+    # Lets the browser persist the per-swagger specs file and the Postman/Karate
+    # exports to disk under output/. The target is taken from the `path` query
+    # param and resolved against OUTPUT_ROOT; anything that escapes that folder
+    # (absolute paths, `..`, another drive) is rejected so a stray request can't
+    # write elsewhere on the machine.
+    def save(self):
+        # Drain the request body first so the socket is clean before we respond
+        # (responding with data still pending on the socket resets it on Windows).
+        length = int(self.headers.get('Content-Length') or 0)
+        body = self.rfile.read(length) if length else b''
+
+        query = urllib.parse.urlsplit(self.path).query
+        rel = (urllib.parse.parse_qs(query).get('path') or [''])[0]
+        if not rel:
+            self.send_error(400, 'Missing target path (/save?path=output/...)')
+            return
+
+        target = os.path.realpath(os.path.join(os.getcwd(), rel))
+        try:
+            inside = os.path.commonpath([target, OUTPUT_ROOT]) == OUTPUT_ROOT
+        except ValueError:
+            inside = False  # different drive on Windows
+        if not inside:
+            self.send_error(403, 'Path must resolve inside output/')
+            return
+
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, 'wb') as f:
+            f.write(body)
+
+        payload = json.dumps({'ok': True, 'path': rel}).encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
 
 port = int(os.environ.get('PORT', '8000'))

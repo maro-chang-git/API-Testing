@@ -1,11 +1,14 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './swagger-loader.js';
 import { profileEndpoint, matchTemplates, getOperation, expectedStatuses } from './template-matcher.js';
-import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult, setOnResponse } from './request-builder.js';
+import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult, setOnResponse, saveBaseline } from './request-builder.js';
 import { exportPostman, getTestScripts, CATEGORY_ORDER } from './postman-collection-builder.js';
 import { exportKarate } from './karate-feature-builder.js';
 import { loadConfig } from './config-loader.js';
+import * as specsStore from './specs-store.js';
 import { generateTestCasesFromResponse } from './response-test-generator.js';
 
+let manifest        = [];       // swaggers/index.json entries
+let currentSwagger  = null;     // { id, file, title } of the selected swagger
 let templates       = [];
 let currentSpec     = null;
 let currentProfile  = null;
@@ -61,25 +64,27 @@ window.__rbSaveResult    = (actualStatus, elapsed, passed) => {
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function init() {
-  const [manifest, tplData] = await Promise.all([
+  const [manifestData, tplData] = await Promise.all([
     loadManifest(),
     fetch('data/templates.json').then(r => r.json()),
     loadConfig(),
   ]);
 
+  manifest  = manifestData;
   templates = tplData.templates;
 
   populateSwaggerSelect(manifest);
   bindFilters();
   bindTabs();
   setOnResponse(handleTryItResponse);
+  window.__rbSaveBaseline = () => saveBaseline();
   renderTable([]);
   renderSummary([]);
 
   if (manifest.length > 0) {
     const first = manifest[0];
     document.getElementById('f-swagger').value = `${first.id}|${first.file}`;
-    await onSwaggerChange(first.file);
+    await onSwaggerChange(`${first.id}|${first.file}`);
   }
 }
 
@@ -107,10 +112,18 @@ function populateSwaggerSelect(manifest) {
   manifest.forEach(s => sel.appendChild(new Option(s.title, `${s.id}|${s.file}`)));
 }
 
-async function onSwaggerChange(file) {
+async function onSwaggerChange(value) {
+  const [id, file] = value.split('|');
+  currentSwagger = manifest.find(m => m.id === id) || { id, file, title: '' };
+
   currentSpec = await loadSwagger(file);
+  // Load the per-swagger specs (or scaffold from the spec + config) so Try It
+  // defaults and exports read from output/{id}/specs.json.
+  await specsStore.loadOrScaffoldSpecs(currentSwagger, currentSpec);
   currentProfile = null;
   matchedCases = [];
+
+  document.getElementById('btn-save-specs').style.display = '';
 
   const tagSel = document.getElementById('f-tag');
   tagSel.innerHTML = '<option value="">All Tags</option>';
@@ -336,10 +349,10 @@ window.__viewGenerated = () => {
 
 function bindFilters() {
   document.getElementById('f-swagger').addEventListener('change', async e => {
-    const [, file] = e.target.value.split('|');
-    if (file) {
-      await onSwaggerChange(file);
+    if (e.target.value) {
+      await onSwaggerChange(e.target.value);
     } else {
+      currentSwagger = null;
       currentSpec = null;
       currentProfile = null;
       matchedCases = [];
@@ -350,6 +363,7 @@ function bindFilters() {
           : '<option value="">— Select Endpoint —</option>';
         el.disabled = true;
       });
+      document.getElementById('btn-save-specs').style.display = 'none';
       setExportVisible(false);
       renderTable([]);
       renderSummary([]);
@@ -400,6 +414,7 @@ function bindFilters() {
   document.getElementById('btn-export').addEventListener('click', exportCases);
   document.getElementById('btn-postman').addEventListener('click', onExportPostman);
   document.getElementById('btn-karate').addEventListener('click', onExportKarate);
+  document.getElementById('btn-save-specs').addEventListener('click', onSaveSpecs);
 
   // Swagger-UI-style: click a row to expand/collapse its detail panel.
   document.getElementById('tbody').addEventListener('click', e => {
@@ -623,14 +638,31 @@ function exportCases() {
   URL.revokeObjectURL(url);
 }
 
-function onExportPostman() {
-  if (!currentProfile || !matchedCases.length || !currentSpec) return;
-  exportPostman(currentProfile, currentOperation, currentSpec, matchedCases);
+async function onExportPostman() {
+  if (!currentProfile || !matchedCases.length || !currentSpec || !currentSwagger) return;
+  const saved = await exportPostman(currentProfile, currentOperation, currentSpec, matchedCases, currentSwagger.id);
+  flashButton('btn-postman', 'Export Postman', saved ? 'Saved ✓' : 'Downloaded ↓');
 }
 
-function onExportKarate() {
-  if (!currentProfile || !matchedCases.length || !currentSpec) return;
-  exportKarate(currentProfile, currentOperation, currentSpec, matchedCases);
+async function onExportKarate() {
+  if (!currentProfile || !matchedCases.length || !currentSpec || !currentSwagger) return;
+  const saved = await exportKarate(currentProfile, currentOperation, currentSpec, matchedCases, currentSwagger.id);
+  flashButton('btn-karate', 'Export Karate', saved ? 'Saved ✓' : 'Downloaded ↓');
+}
+
+// Persists the per-swagger specs file (output/{id}/specs.json).
+async function onSaveSpecs() {
+  if (!currentSwagger) return;
+  const saved = await specsStore.saveSpecs();
+  flashButton('btn-save-specs', 'Save Specs', saved ? 'Saved ✓' : 'Dev server off');
+}
+
+// Briefly swaps a button's label to confirm an action, then restores it.
+function flashButton(id, label, msg) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.textContent = msg;
+  setTimeout(() => { btn.textContent = label; }, 1600);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

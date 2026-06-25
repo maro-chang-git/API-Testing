@@ -1,5 +1,6 @@
 import { getConfig } from './config-loader.js';
 import { expectedStatuses } from './template-matcher.js';
+import * as specsStore from './specs-store.js';
 import Ajv from './vendor/ajv/ajv.js';
 import addFormats from './vendor/ajv/ajv-formats.js';
 
@@ -10,6 +11,7 @@ let _spec      = null;   // full swagger spec (for basePath/host)
 let _activeTc         = null;   // test case currently being run
 let _onSaveResult     = null;   // callback(tcId, {actual_status, elapsed, passed})
 let _onResponse       = null;   // callback({status, body}) fired after a successful response
+let _lastResponse     = null;   // { status, body, elapsed } of the most recent send (for baseline capture)
 
 export function setOnResponse(fn) { _onResponse = fn; }
 
@@ -149,7 +151,7 @@ export function getBaseUrl(spec) {
 }
 
 function renderEndpointInfo() {
-  const baseUrl = getBaseUrl(_spec);
+  const baseUrl = specsStore.effectiveBaseUrl(_spec);
   document.getElementById('rb-base-url').value         = baseUrl;
   document.getElementById('rb-method-badge').textContent  = _profile.method;
   document.getElementById('rb-method-badge').className    = `badge method-${_profile.method}`;
@@ -166,10 +168,12 @@ function renderPathParams() {
     return;
   }
 
+  // Seed each input from the endpoint's specs (falls back to config / blank).
+  const seed = specsStore.effectivePathParams(_profile.method, _profile.path);
   container.innerHTML = matches.map(name => `
     <div class="rb-param-row">
       <label class="rb-param-name">{${name}}</label>
-      <input type="text" class="rb-param-input" data-param="${name}" placeholder="value" />
+      <input type="text" class="rb-param-input" data-param="${name}" value="${escHtml(seed[name] || '')}" placeholder="value" />
     </div>
   `).join('');
 }
@@ -193,9 +197,25 @@ function renderQueryParams() {
 }
 
 function renderAuthSection() {
-  document.getElementById('rb-auth-type').value  = 'none';
-  document.getElementById('rb-auth-value').value = '';
-  document.getElementById('rb-auth-key').value   = '';
+  const typeSel = document.getElementById('rb-auth-type');
+  const valEl   = document.getElementById('rb-auth-value');
+  const keyEl   = document.getElementById('rb-auth-key');
+
+  // Pre-fill from the specs auth when the endpoint requires auth and a token is
+  // configured; otherwise leave it as "none" for the user to fill in. The auth
+  // style is a best-effort guess from where the credential goes — editable here.
+  const auth = specsStore.effectiveAuth();
+  if (_profile?.auth_required && auth.token) {
+    typeSel.value = auth.in === 'query'                          ? 'api_key_query'
+                  : (auth.in === 'cookie' || isCookieAuth(auth.type)) ? 'cookie'
+                  :                                                  'bearer';
+    valEl.value = typeSel.value === 'cookie' ? `session=${auth.token}` : auth.token;
+    keyEl.value = '';
+  } else {
+    typeSel.value = 'none';
+    valEl.value   = '';
+    keyEl.value   = '';
+  }
   toggleAuthInput();
 }
 
@@ -264,6 +284,20 @@ export function buildExampleFromSchema(schema) {
   return primitiveExample(type, schema.format, schema.enum);
 }
 
+// Builds an example body for a given response status, reusing the same
+// status→schema lookup the Try It schema-validation panel uses (responseSchema).
+// `status` may be a code ('200', '404') or 'default'. Returns the example
+// object/array/scalar, or null when that status has no schema. Used by the
+// specs scaffolder to seed each endpoint's 200 / error response bodies.
+export function getResponseExample(operation, status, spec) {
+  const responses = operation?.responses;
+  if (!responses) return null;
+  const resDef = responses[status] ?? responses.default;
+  if (!resDef) return null;
+  const schema = responseSchema(resDef);
+  return schema ? buildExampleFromSchema(schema, spec) : null;
+}
+
 function primitiveExample(type, format, enumVals) {
   if (enumVals?.length) return enumVals[0];
 
@@ -292,7 +326,7 @@ function renderDefaultHeaders() {
   // Clear previous default headers; keep any user-added ones
   list.querySelectorAll('[data-default-header]').forEach(el => el.remove());
 
-  const { headers } = getConfig();
+  const headers = specsStore.effectiveHeaders();
   const defaults = [
     ['Accept', headers.accept],
     ...(hasBody ? [['Content-Type', headers.contentType]] : []),
@@ -516,6 +550,11 @@ function showResponse({ status, statusText, headers, body, elapsed, url }) {
   const panel = document.getElementById('rb-response');
   panel.style.display = '';
 
+  // Remember the latest response so it can be captured as a baseline snapshot.
+  _lastResponse = { status, body, elapsed };
+  const baselineNotice = document.getElementById('rb-baseline-notice');
+  if (baselineNotice) { baselineNotice.style.display = 'none'; baselineNotice.textContent = ''; }
+
   const cls = status >= 500 ? 's5xx' : status >= 400 ? 's4xx' : 's2xx';
   document.getElementById('rb-res-status').innerHTML =
     `<span class="status ${cls}">${status}</span> ${escHtml(statusText)} <span class="rb-elapsed">${elapsed}ms</span>`;
@@ -599,8 +638,39 @@ function clearResponse() {
   const panel = document.getElementById('rb-response');
   panel.style.display = 'none';
   hideTcComparison();
+  _lastResponse = null;
   const notice = document.getElementById('rb-gen-notice');
   if (notice) { notice.style.display = 'none'; notice.innerHTML = ''; }
+  const baselineNotice = document.getElementById('rb-baseline-notice');
+  if (baselineNotice) { baselineNotice.style.display = 'none'; baselineNotice.textContent = ''; }
+}
+
+// Records the most recent response as the current endpoint's baseline and
+// persists the specs file. Wired to the "Save as baseline" button via app.js.
+export async function saveBaseline() {
+  const notice = document.getElementById('rb-baseline-notice');
+  if (!_profile || !_lastResponse) {
+    if (notice) { notice.style.display = ''; notice.textContent = '📌 Send a request first, then record its response as a baseline.'; }
+    return;
+  }
+
+  let body = _lastResponse.body;
+  try { body = JSON.parse(_lastResponse.body); } catch { /* keep raw text */ }
+
+  specsStore.setBaseline(_profile.method, _profile.path, {
+    status: _lastResponse.status,
+    responseTime: _lastResponse.elapsed,
+    body,
+    recordedAt: new Date().toISOString(),
+  });
+
+  const ok = await specsStore.saveSpecs();
+  if (notice) {
+    notice.style.display = '';
+    notice.textContent = ok
+      ? `📌 Baseline saved (${_lastResponse.status} · ${_lastResponse.elapsed}ms) for ${_profile.method} ${_profile.path}.`
+      : `📌 Baseline recorded in memory — run devserver.py to persist it to output/.`;
+  }
 }
 
 // ── Schema validation ─────────────────────────────────────────────────────────

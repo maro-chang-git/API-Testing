@@ -133,6 +133,20 @@ button#btn-karate {
 }
 button#btn-karate:hover { background: #15803d; }
 
+button#btn-save-specs {
+  background: #475569;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+button#btn-save-specs:hover { background: #334155; }
+
 /* ── Summary cards ── */
 .summary {
   display: flex;
@@ -500,6 +514,22 @@ td { padding: 10px 14px; vertical-align: top; }
   margin-left: auto;
 }
 .rb-add-btn:hover { background: #6366f1; color: #fff; }
+
+/* "Save as baseline" button in the response title bar */
+.rb-baseline-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #6366f1;
+  border-radius: 4px;
+  color: #6366f1;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.rb-baseline-btn:hover { background: #6366f1; color: #fff; }
 
 .rb-header-row {
   display: grid;

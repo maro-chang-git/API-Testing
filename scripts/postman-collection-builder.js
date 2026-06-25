@@ -1,5 +1,6 @@
-import { buildExampleFromSchema, getRequestBodySchema, getBaseUrl, isCookieAuth } from './request-builder.js';
+import { buildExampleFromSchema, getRequestBodySchema, isCookieAuth } from './request-builder.js';
 import { getConfig } from './config-loader.js';
+import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectivePathParams, saveOrDownload } from './specs-store.js';
 import { getTestBody, BODY_KIND } from './body-builder.js';
 import { expectedStatuses } from './template-matcher.js';
 
@@ -12,10 +13,10 @@ import { expectedStatuses } from './template-matcher.js';
  * @param {object} spec      - full swagger spec
  * @param {Array}  testCases - matched test cases
  */
-export function exportPostman(profile, operation, spec, testCases) {
+export async function exportPostman(profile, operation, spec, testCases, swaggerId) {
   const method  = profile.method;
   const hasBody = ['POST', 'PUT', 'PATCH'].includes(method);
-  const baseUrl = getBaseUrl(spec);
+  const baseUrl = effectiveBaseUrl(spec);
 
   const bodySchema  = getRequestBodySchema(operation);
   const exampleObj  = hasBody && bodySchema
@@ -44,11 +45,12 @@ export function exportPostman(profile, operation, spec, testCases) {
   const variable = [];
   const seen = new Set();
   const addVar = v => { if (!seen.has(v.key)) { seen.add(v.key); variable.push(v); } };
-  const cfg = getConfig();
-  addVar({ key: 'baseUrl',       value: baseUrl,              type: 'string' });
-  addVar({ key: 'token',         value: cfg.auth.token,        type: 'string', description: 'Valid bearer token' });
-  addVar({ key: 'expired_token', value: cfg.auth.expiredToken, type: 'string', description: 'An expired bearer token for auth tests' });
-  pathParamNames.forEach(n => addVar({ key: n, value: '', type: 'string' }));
+  const auth = effectiveAuth();
+  const pathParamDefaults = effectivePathParams(method, profile.path);
+  addVar({ key: 'baseUrl',       value: baseUrl,             type: 'string' });
+  addVar({ key: 'token',         value: auth.token,          type: 'string', description: 'Valid bearer token' });
+  addVar({ key: 'expired_token', value: auth.expiredToken,   type: 'string', description: 'An expired bearer token for auth tests' });
+  pathParamNames.forEach(n => addVar({ key: n, value: pathParamDefaults[n] || '', type: 'string' }));
   validVars.forEach(addVar);
 
   const collection = {
@@ -60,7 +62,7 @@ export function exportPostman(profile, operation, spec, testCases) {
     variable,
   };
 
-  download(collection, method, profile.path);
+  return download(collection, method, profile.path, swaggerId);
 }
 
 // Render a body example two ways: a variabilised valid body ({{field}} collection
@@ -322,18 +324,18 @@ function parseCollectionKey(base) {
 }
 
 function buildHeaders(tc, profile, hasBody) {
-  const cfg = getConfig();
+  const headers = effectiveHeaders();
   const authHeader = resolveAuthHeader(tc, profile);
   return [
-    { key: 'Accept', value: cfg.headers.accept },
-    ...(hasBody ? [{ key: 'Content-Type', value: cfg.headers.contentType }] : []),
+    { key: 'Accept', value: headers.accept },
+    ...(hasBody ? [{ key: 'Content-Type', value: headers.contentType }] : []),
     ...(authHeader ? [authHeader] : []),
   ];
 }
 
 function resolveAuthHeader(tc, profile) {
   const cookieAuth = isCookieAuth(profile.auth_type);
-  const invalid = getConfig().auth.invalidTokenValue;
+  const invalid = effectiveAuth().invalidTokenValue;
   if (tc.category === 'auth') {
     if (tc.auth_status === 'invalid')  return cookieAuth
       ? { key: 'Cookie',        value: `session=${invalid}` }
@@ -362,11 +364,11 @@ function buildUrl(profile, queryParams, pathParamNames) {
 
 // ── Download ──────────────────────────────────────────────────────────────────
 
-function download(collection, method, path) {
+// Writes the collection to output/{id}/postman/ via the dev-server save
+// endpoint, falling back to a browser download when it isn't running.
+function download(collection, method, path, swaggerId) {
   const slug = path.replace(/^\//, '').replace(/\//g, '-').replace(/[{}]/g, '').replace(/-+/g, '-');
   const filename = `postman-${method.toLowerCase()}-${slug}.json`;
-  const blob = new Blob([JSON.stringify(collection, null, 2)], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  Object.assign(document.createElement('a'), { href: url, download: filename }).click();
-  URL.revokeObjectURL(url);
+  const content  = JSON.stringify(collection, null, 2);
+  return saveOrDownload(`output/${swaggerId}/postman/${filename}`, filename, content, 'application/json');
 }

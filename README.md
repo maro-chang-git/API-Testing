@@ -43,6 +43,7 @@ API Testing/
 │   ├── body-builder.js                 # Shared layer that builds valid / negative request bodies for exporters
 │   ├── postman-collection-builder.js   # Postman v2.1 export + pm.test scripts + category ordering
 │   ├── karate-feature-builder.js       # Karate .feature export
+│   ├── specs-store.js                  # Per-swagger specs file: scaffold, effective resolvers, save
 │   └── response-test-generator.js      # Exploratory: derive cases from a live / pasted response body
 ├── data/
 │   ├── templates.json                  # General-purpose test case template library
@@ -52,10 +53,15 @@ API Testing/
 │   ├── testek.json                     # Testek Product Management API (Swagger 2.0)
 │   ├── openapi3.json                   # Minimal OpenAPI 3 example
 │   └── openfigi.json                   # OpenFIGI API (OpenAPI 3, real-world)
+├── output/                             # Generated per swagger (id from index.json)
+│   └── {id}/
+│       ├── specs.json                  # Swagger + endpoint specs + recorded baselines
+│       ├── postman/postman-{method}-{slug}.json
+│       └── karate/karate-{method}-{slug}.feature
 └── README.md
 ```
 
-> `swaggers/*` and `TODO.md` are git-ignored — see `.gitignore`.
+> `swaggers/*`, `output/*`, and `TODO.md` are git-ignored — see `.gitignore`.
 
 ## Architecture & data flow
 
@@ -170,11 +176,60 @@ Click **▶** on any test case row to run it in Try It:
 
 | Button | Output | Notes |
 |---|---|---|
-| **Export JSON** | `api-{method}-{endpoint}-testcases.json` | All cases (with saved results), ordered by category |
-| **Export Postman** | `postman-{method}-{endpoint}.json` | Postman Collection v2.1, folders per category, every request carries `pm.test` scripts (status, response-time, body/shape assertions). Valid body fields become collection variables. |
-| **Export Karate** | `karate-{method}-{endpoint}.feature` | One Karate `Feature` with a `Background` (url, tokens, path params, valid body) and a `@category`-tagged `Scenario` per case, including status, `responseTime`, and `match` assertions. |
+| **Export JSON** | downloaded `api-{method}-{endpoint}-testcases.json` | All cases (with saved results), ordered by category |
+| **Export Postman** | `output/{id}/postman/postman-{method}-{endpoint}.json` | Postman Collection v2.1, folders per category, every request carries `pm.test` scripts (status, response-time, body/shape assertions). Valid body fields become collection variables. |
+| **Export Karate** | `output/{id}/karate/karate-{method}-{endpoint}.feature` | One Karate `Feature` with a `Background` (url, tokens, path params, valid body) and a `@category`-tagged `Scenario` per case, including status, `responseTime`, and `match` assertions. |
+
+The Postman and Karate exports are **written to disk under `output/{id}/`** (the `id` from
+`swaggers/index.json`) via the dev-server `POST /save` endpoint, and they draw their base URL, auth
+tokens, headers, and path-param defaults from the [per-swagger specs file](#per-swagger-specs-file). If
+the page isn't being served by `devserver.py` (so `/save` is unavailable), the export falls back to a
+normal browser download. Export JSON always downloads.
 
 All three reuse the same category ordering (`happy_path → positive → negative → auth → boundary → generated`) and the same body-builder layer, so the cases line up across formats.
+
+## Per-swagger specs file
+
+Each swagger gets an editable specs document at `output/{id}/specs.json` that is the **single source of
+truth** for that API's test configuration and recorded baselines. It is scaffolded from the spec +
+`data/config.json` the first time you select the swagger, and read back to drive both the Try It
+defaults and the Postman/Karate exports. A value present in the file **overrides** the derived one
+(effective value = `specs ?? config ?? spec`).
+
+```jsonc
+{
+  "swaggerId": "testek", "title": "…", "file": "testek.json",
+  "generatedAt": "…", "updatedAt": "…",
+
+  "swagger": {                                   // ── Swagger specs ──
+    "baseUrl": "https://api.example.com/v1",
+    "auth": { "type": "OAuth2", "in": "header",  // scheme name + where the credential goes
+              "token": "", "expiredToken": "", "invalidTokenValue": "invalid_token_tampered_xyz" },
+    "headers": { "accept": "application/json", "contentType": "application/json" }
+  },
+
+  "endpoints": {                                 // keyed by "METHOD /path"
+    "GET /products/{id}": {                      // ── Endpoint specs ──
+      "method": "GET", "path": "/products/{id}", "summary": "…", "authRequired": true,
+      "pathParams": { "id": "" },
+      "responses": { "200": { /* example from the 200 schema */ }, "error": { /* first 4xx schema */ } },
+      "baseline": {                              // ── recorded snapshot (BaselineEntry) ──
+        "status": 200, "responseTime": 123, "body": { /* actual response */ }, "recordedAt": "…"
+      }
+    }
+  }
+}
+```
+
+- **Save Specs** (toolbar) writes the current model to `output/{id}/specs.json`.
+- **Save as baseline** (Try It response panel) records the most recent live response — status,
+  response time, body, timestamp — as that endpoint's `baseline`, for later regression comparison, and
+  saves the specs file.
+- Edit `specs.json` by hand (e.g. set a real `baseUrl` / `token` / path-param value) and reload — the
+  Try It tab and the next export pick up your edits.
+
+Writing requires the dev server (it exposes `POST /save?path=output/…`, which only ever writes inside
+`output/`). Without it, Save Specs is a no-op and exports fall back to a browser download.
 
 ## Adding a new Swagger
 

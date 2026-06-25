@@ -99,6 +99,7 @@
     </div>
     <div class="toolbar-actions">
       <span class="count" id="count-label"></span>
+      <button id="btn-save-specs" style="display:none;">Save Specs</button>
       <button id="btn-export"  style="display:none;">Export JSON</button>
       <button id="btn-postman" style="display:none;">Export Postman</button>
       <button id="btn-karate"  style="display:none;">Export Karate</button>
@@ -222,7 +223,14 @@
 
       <!-- Response -->
       <div id="rb-response" style="display:none;">
-        <div class="rb-section-title rb-res-title">Response</div>
+        <div class="rb-section-title rb-res-title">
+          Response
+          <button id="rb-baseline-btn" class="rb-baseline-btn" onclick="window.__rbSaveBaseline()"
+                  title="Record this response as the endpoint baseline in the specs file">📌 Save as baseline</button>
+        </div>
+
+        <!-- Baseline save feedback -->
+        <div id="rb-baseline-notice" class="rb-gen-notice" style="display:none;"></div>
 
         <!-- Auto-generated test cases notice -->
         <div id="rb-gen-notice" class="rb-gen-notice" style="display:none;"></div>

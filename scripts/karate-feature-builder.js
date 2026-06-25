@@ -1,6 +1,7 @@
-import { buildExampleFromSchema, getRequestBodySchema, getBaseUrl, isCookieAuth } from './request-builder.js';
+import { buildExampleFromSchema, getRequestBodySchema, isCookieAuth } from './request-builder.js';
 import { CATEGORY_ORDER } from './postman-collection-builder.js';
 import { getConfig } from './config-loader.js';
+import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectivePathParams, saveOrDownload } from './specs-store.js';
 import { getTestBody, BODY_KIND } from './body-builder.js';
 import { expectedStatuses } from './template-matcher.js';
 
@@ -22,10 +23,10 @@ const CATEGORY_LABEL = {
  * @param {object} spec      - full swagger spec
  * @param {Array}  testCases - matched test cases
  */
-export function exportKarate(profile, operation, spec, testCases) {
+export async function exportKarate(profile, operation, spec, testCases, swaggerId) {
   const method     = profile.method;
   const hasBody    = ['POST', 'PUT', 'PATCH'].includes(method);
-  const baseUrl    = getBaseUrl(spec);
+  const baseUrl    = effectiveBaseUrl(spec);
   const cookieAuth = isCookieAuth(profile.auth_type);
 
   const bodySchema = getRequestBodySchema(operation);
@@ -41,18 +42,19 @@ export function exportKarate(profile, operation, spec, testCases) {
   lines.push('  Background:');
   lines.push(`    * url '${baseUrl}'`);
 
-  const cfg = getConfig();
+  const auth = effectiveAuth();
   if (profile.auth_required) {
     if (cookieAuth) {
-      lines.push(`    * def sessionToken   = '${cfg.auth.token        || '<replace-with-valid-session-token>'}'`);
-      lines.push(`    * def expiredSession = '${cfg.auth.expiredToken  || '<replace-with-expired-session-token>'}'`);
+      lines.push(`    * def sessionToken   = '${auth.token        || '<replace-with-valid-session-token>'}'`);
+      lines.push(`    * def expiredSession = '${auth.expiredToken  || '<replace-with-expired-session-token>'}'`);
     } else {
-      lines.push(`    * def token        = '${cfg.auth.token        || '<replace-with-valid-bearer-token>'}'`);
-      lines.push(`    * def expiredToken = '${cfg.auth.expiredToken  || '<replace-with-expired-bearer-token>'}'`);
+      lines.push(`    * def token        = '${auth.token        || '<replace-with-valid-bearer-token>'}'`);
+      lines.push(`    * def expiredToken = '${auth.expiredToken  || '<replace-with-expired-bearer-token>'}'`);
     }
   }
+  const pathParamDefaults = effectivePathParams(method, profile.path);
   pathParamNames.forEach(n => {
-    const val = cfg.pathParams[n] || `<replace-with-${n}>`;
+    const val = pathParamDefaults[n] || `<replace-with-${n}>`;
     lines.push(`    * def ${n} = '${val}'`);
   });
 
@@ -78,7 +80,7 @@ export function exportKarate(profile, operation, spec, testCases) {
     });
   });
 
-  download(lines.join('\n'), method, profile.path);
+  return download(lines.join('\n'), method, profile.path, swaggerId);
 }
 
 // ── Scenario ──────────────────────────────────────────────────────────────────
@@ -90,9 +92,9 @@ function buildScenario(tc, profile, method, hasBody, validBodyExpr, exampleObj, 
   lines.push(`  @${tc.category}`);
   lines.push(`  Scenario: ${tc.id} — ${tc.purpose}`);
   lines.push(`    Given path ${buildKaratePath(profile.path)}`);
-  const cfg = getConfig();
-  lines.push(`    And header Accept = '${cfg.headers.accept}'`);
-  if (reqHasBody) lines.push(`    And header Content-Type = '${cfg.headers.contentType}'`);
+  const headers = effectiveHeaders();
+  lines.push(`    And header Accept = '${headers.accept}'`);
+  if (reqHasBody) lines.push(`    And header Content-Type = '${headers.contentType}'`);
 
   const authLine = resolveAuthLine(tc, profile, cookieAuth);
   if (authLine) lines.push(`    ${authLine}`);
@@ -125,7 +127,7 @@ function buildKaratePath(path) {
 }
 
 function resolveAuthLine(tc, profile, cookieAuth) {
-  const invalid = getConfig().auth.invalidTokenValue;
+  const invalid = effectiveAuth().invalidTokenValue;
   if (tc.category === 'auth') {
     if (tc.auth_status === 'invalid') return cookieAuth
       ? `And header Cookie = 'session=${invalid}'`
@@ -274,11 +276,10 @@ function karateValueLiteral(val) {
 
 // ── Download ──────────────────────────────────────────────────────────────────
 
-function download(content, method, path) {
+// Writes the feature to output/{id}/karate/ via the dev-server save endpoint,
+// falling back to a browser download when it isn't running.
+function download(content, method, path, swaggerId) {
   const slug     = path.replace(/^\//, '').replace(/\//g, '-').replace(/[{}]/g, '').replace(/-+/g, '-');
   const filename = `karate-${method.toLowerCase()}-${slug}.feature`;
-  const blob     = new Blob([content], { type: 'text/plain' });
-  const url      = URL.createObjectURL(blob);
-  Object.assign(document.createElement('a'), { href: url, download: filename }).click();
-  URL.revokeObjectURL(url);
+  return saveOrDownload(`output/${swaggerId}/karate/${filename}`, filename, content, 'text/plain');
 }
