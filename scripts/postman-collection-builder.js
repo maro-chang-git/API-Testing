@@ -1,6 +1,6 @@
-import { buildExampleFromSchema, getRequestBodySchema, isCookieAuth } from './request-builder.js';
+import { isCookieAuth } from './request-builder.js';
 import { getConfig } from './config-loader.js';
-import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectivePathParams, saveOrDownload } from './specs-store.js';
+import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectivePathParams, effectiveRequestBody, saveOrDownload } from './specs-store.js';
 import { getTestBody, BODY_KIND } from './body-builder.js';
 import { expectedStatuses } from './template-matcher.js';
 
@@ -18,9 +18,9 @@ export async function exportPostman(profile, operation, spec, testCases, swagger
   const hasBody = ['POST', 'PUT', 'PATCH'].includes(method);
   const baseUrl = effectiveBaseUrl(spec);
 
-  const bodySchema  = getRequestBodySchema(operation);
-  const exampleObj  = hasBody && bodySchema
-    ? buildExampleFromSchema(bodySchema, spec)
+  // Valid-body example: the specs request body (user-edited) or the schema example.
+  const exampleObj  = hasBody
+    ? effectiveRequestBody(method, profile.path, operation, spec)
     : null;
 
   // Body renderings:

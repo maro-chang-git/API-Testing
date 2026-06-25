@@ -40,10 +40,14 @@ export function initRequestBuilder(profile, operation, spec) {
   renderEndpointInfo();
   renderPathParams();
   renderQueryParams();
-  renderAuthSection();
   renderBodySection();
   resetHeadersList();
   renderDefaultHeaders();
+  // Auth last: renderAuthSection() pre-fills the token and inserts the read-only
+  // Authorization "auto-auth" header row. It must run AFTER resetHeadersList()
+  // (which clears the list) so a pre-filled token's header survives into the
+  // request — otherwise the field shows the token but no Authorization is sent.
+  renderAuthSection();
   clearActiveTcBanner();
   clearResponse();
 }
@@ -224,12 +228,10 @@ function renderBodySection() {
   document.getElementById('rb-body-section').style.display = hasBody ? '' : 'none';
   if (!hasBody) return;
 
-  const bodySchema = getRequestBodySchema(_operation);
-  const example    = bodySchema
-    ? buildExampleFromSchema(bodySchema, _spec)
-    : null;
+  // Pre-fill from the specs request body (user-edited) or the schema example.
+  const example = specsStore.effectiveRequestBody(_profile.method, _profile.path, _operation, _spec);
 
-  document.getElementById('rb-body').value = example !== null
+  document.getElementById('rb-body').value = (example !== null && example !== undefined)
     ? JSON.stringify(example, null, 2)
     : '{\n  \n}';
 }
@@ -643,6 +645,31 @@ function clearResponse() {
   if (notice) { notice.style.display = 'none'; notice.innerHTML = ''; }
   const baselineNotice = document.getElementById('rb-baseline-notice');
   if (baselineNotice) { baselineNotice.style.display = 'none'; baselineNotice.textContent = ''; }
+}
+
+// Captures the valid bearer/cookie/api-key token currently entered in the Try It
+// auth field into the specs model, so Save Specs persists it and switching
+// endpoints keeps it. Auth-test presets (missing / invalid / expired) are skipped
+// so a tampered or expired token never overwrites the real one.
+export function captureTryItAuth() {
+  if (_activeTc && _activeTc.category === 'auth') return;
+  const type  = document.getElementById('rb-auth-type')?.value;
+  const value = document.getElementById('rb-auth-value')?.value.trim();
+  if (!type || type === 'none' || !value) return;
+  const token = type === 'cookie' ? value.replace(/^session=/, '') : value;
+  specsStore.setAuthToken(token);
+}
+
+// Captures the request body currently in the Try It editor into the endpoint
+// specs (only for body methods, and only when it parses as JSON). Called on
+// Save Specs so the edited body becomes the source of truth for exports.
+export function captureTryItBody() {
+  if (!_profile || !['POST', 'PUT', 'PATCH'].includes(_profile.method)) return;
+  const raw = document.getElementById('rb-body')?.value;
+  if (raw == null) return;
+  let body;
+  try { body = JSON.parse(raw); } catch { return; }   // skip invalid JSON
+  specsStore.setRequestBody(_profile.method, _profile.path, body);
 }
 
 // Records the most recent response as the current endpoint's baseline and

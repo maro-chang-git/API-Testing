@@ -13,7 +13,7 @@
 //     endpoints: { "GET /path": { method, path, summary, authRequired, pathParams, responses: { "200", error }, baseline? } }
 //   }
 
-import { getBaseUrl, isCookieAuth, getResponseExample } from './request-builder.js';
+import { getBaseUrl, isCookieAuth, getResponseExample, getRequestBodySchema, buildExampleFromSchema } from './request-builder.js';
 import { getConfig } from './config-loader.js';
 import { getEndpointsByTag } from './swagger-loader.js';
 import { getOperation, profileEndpoint } from './template-matcher.js';
@@ -56,12 +56,14 @@ function scaffoldSpecs(entry, spec) {
       const op = getOperation(spec, path, method);
       if (!op) continue;
       const profile = profileEndpoint(path, method, op, spec);
+      const hasBody = ['POST', 'PUT', 'PATCH'].includes(profile.method);
       endpoints[specKey(method, path)] = {
         method: profile.method,
         path,
         summary: op.summary || '',
         authRequired: profile.auth_required,
         pathParams: scaffoldPathParams(path, cfg),
+        ...(hasBody ? { requestBody: requestBodyExample(op, spec) } : {}),
         responses: {
           '200':  getResponseExample(op, '200', spec),
           error:  errorExample(op, spec),
@@ -91,6 +93,12 @@ function scaffoldPathParams(path, cfg) {
     out[name] = cfg.pathParams?.[name] ?? '';
   }
   return out;
+}
+
+// Example request body from the operation's request schema (POST/PUT/PATCH).
+function requestBodyExample(op, spec) {
+  const schema = getRequestBodySchema(op);
+  return schema ? buildExampleFromSchema(schema, spec) : null;
 }
 
 // Example body for the first declared 4xx response (falling back to `default`).
@@ -164,6 +172,15 @@ export function effectiveHeaders() {
   };
 }
 
+// Request body for an endpoint: the specs value (user-edited) when present,
+// otherwise the example built from the operation's request schema.
+export function effectiveRequestBody(method, path, operation, spec) {
+  const e = getEndpointSpecs(method, path);
+  if (e && e.requestBody !== undefined && e.requestBody !== null) return e.requestBody;
+  const schema = getRequestBodySchema(operation);
+  return schema ? buildExampleFromSchema(schema, spec) : null;
+}
+
 // Path-param defaults for an endpoint: the specs value first, then config, then ''.
 export function effectivePathParams(method, path) {
   const cfg = getConfig();
@@ -176,6 +193,24 @@ export function effectivePathParams(method, path) {
 }
 
 // ── Mutations ────────────────────────────────────────────────────────────────
+
+// Stores the valid auth token captured from the Try It tab into the swagger specs.
+export function setAuthToken(token) {
+  if (!_model) return;
+  (_model.swagger ||= {});
+  (_model.swagger.auth ||= {});
+  _model.swagger.auth.token = token;
+  _model.updatedAt = new Date().toISOString();
+}
+
+// Stores the request body captured from the Try It tab into the endpoint specs.
+export function setRequestBody(method, path, body) {
+  if (!_model) return;
+  const key = specKey(method, path);
+  const e = (_model.endpoints[key] ||= { method: String(method).toUpperCase(), path });
+  e.requestBody = body;
+  _model.updatedAt = new Date().toISOString();
+}
 
 // Records a known-good response snapshot as the endpoint's baseline.
 export function setBaseline(method, path, snapshot) {

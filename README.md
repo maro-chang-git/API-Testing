@@ -176,15 +176,15 @@ Click **▶** on any test case row to run it in Try It:
 
 | Button | Output | Notes |
 |---|---|---|
-| **Export JSON** | downloaded `api-{method}-{endpoint}-testcases.json` | All cases (with saved results), ordered by category |
+| **Export JSON** | `output/{id}/api-{method}-{endpoint}-testcases.json` | All cases (with saved results), ordered by category. Saved next to `specs.json`. |
 | **Export Postman** | `output/{id}/postman/postman-{method}-{endpoint}.json` | Postman Collection v2.1, folders per category, every request carries `pm.test` scripts (status, response-time, body/shape assertions). Valid body fields become collection variables. |
 | **Export Karate** | `output/{id}/karate/karate-{method}-{endpoint}.feature` | One Karate `Feature` with a `Background` (url, tokens, path params, valid body) and a `@category`-tagged `Scenario` per case, including status, `responseTime`, and `match` assertions. |
 
-The Postman and Karate exports are **written to disk under `output/{id}/`** (the `id` from
-`swaggers/index.json`) via the dev-server `POST /save` endpoint, and they draw their base URL, auth
-tokens, headers, and path-param defaults from the [per-swagger specs file](#per-swagger-specs-file). If
-the page isn't being served by `devserver.py` (so `/save` is unavailable), the export falls back to a
-normal browser download. Export JSON always downloads.
+All three exports are **written to disk under `output/{id}/`** (the `id` from `swaggers/index.json`) via
+the dev-server `POST /save` endpoint, and the Postman/Karate exports draw their base URL, auth tokens,
+headers, request body, and path-param defaults from the [per-swagger specs file](#per-swagger-specs-file).
+If the page isn't being served by `devserver.py` (so `/save` is unavailable), each export falls back to a
+normal browser download.
 
 All three reuse the same category ordering (`happy_path → positive → negative → auth → boundary → generated`) and the same body-builder layer, so the cases line up across formats.
 
@@ -209,9 +209,10 @@ defaults and the Postman/Karate exports. A value present in the file **overrides
   },
 
   "endpoints": {                                 // keyed by "METHOD /path"
-    "GET /products/{id}": {                      // ── Endpoint specs ──
-      "method": "GET", "path": "/products/{id}", "summary": "…", "authRequired": true,
-      "pathParams": { "id": "" },
+    "POST /products": {                          // ── Endpoint specs ──
+      "method": "POST", "path": "/products", "summary": "…", "authRequired": true,
+      "pathParams": {},
+      "requestBody": { /* example from the request schema; used as the valid body in exports */ },
       "responses": { "200": { /* example from the 200 schema */ }, "error": { /* first 4xx schema */ } },
       "baseline": {                              // ── recorded snapshot (BaselineEntry) ──
         "status": 200, "responseTime": 123, "body": { /* actual response */ }, "recordedAt": "…"
@@ -221,12 +222,16 @@ defaults and the Postman/Karate exports. A value present in the file **overrides
 }
 ```
 
-- **Save Specs** (toolbar) writes the current model to `output/{id}/specs.json`.
+- **Save Specs** (toolbar) folds the auth **token** and the **request body** currently entered in the
+  Try It tab into the model, then writes it to `output/{id}/specs.json`. The token is swagger-level (one
+  per API); the request body is per-endpoint (the one for the selected endpoint). Auth-test presets
+  (missing / invalid / expired) and non-JSON bodies are skipped so they can't clobber the real values.
+  Nothing is captured or written until you click Save Specs.
 - **Save as baseline** (Try It response panel) records the most recent live response — status,
   response time, body, timestamp — as that endpoint's `baseline`, for later regression comparison, and
-  saves the specs file.
-- Edit `specs.json` by hand (e.g. set a real `baseUrl` / `token` / path-param value) and reload — the
-  Try It tab and the next export pick up your edits.
+  writes the specs file.
+- Edit `specs.json` by hand (e.g. set a real `baseUrl` / `token` / `requestBody` / path-param value) and
+  reload — the Try It tab and the next export pick up your edits.
 
 Writing requires the dev server (it exposes `POST /save?path=output/…`, which only ever writes inside
 `output/`). Without it, Save Specs is a no-op and exports fall back to a browser download.

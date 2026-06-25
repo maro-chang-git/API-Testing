@@ -1,6 +1,6 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './swagger-loader.js';
 import { profileEndpoint, matchTemplates, getOperation, expectedStatuses } from './template-matcher.js';
-import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult, setOnResponse, saveBaseline } from './request-builder.js';
+import { initRequestBuilder, resetRequestBuilder, toggleAuthInput, addHeaderRow, sendRequest, runTestCase, clearActiveTc, saveResult, setOnResponse, saveBaseline, captureTryItAuth, captureTryItBody } from './request-builder.js';
 import { exportPostman, getTestScripts, CATEGORY_ORDER } from './postman-collection-builder.js';
 import { exportKarate } from './karate-feature-builder.js';
 import { loadConfig } from './config-loader.js';
@@ -606,8 +606,8 @@ function toggleDetail(id) {
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
-function exportCases() {
-  if (!currentProfile || !matchedCases.length) return;
+async function exportCases() {
+  if (!currentProfile || !matchedCases.length || !currentSwagger) return;
 
   const slug = currentProfile.path
     .replace(/^\//,'')
@@ -631,11 +631,15 @@ function exportCases() {
     })),
   };
 
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url  = URL.createObjectURL(blob);
-  const a    = Object.assign(document.createElement('a'), { href: url, download: filename });
-  a.click();
-  URL.revokeObjectURL(url);
+  // Write alongside specs.json under output/{id}/ (falls back to a browser
+  // download when the dev server isn't running).
+  const saved = await specsStore.saveOrDownload(
+    `output/${currentSwagger.id}/${filename}`,
+    filename,
+    JSON.stringify(payload, null, 2),
+    'application/json',
+  );
+  flashButton('btn-export', 'Export JSON', saved ? 'Saved ✓' : 'Downloaded ↓');
 }
 
 async function onExportPostman() {
@@ -653,6 +657,9 @@ async function onExportKarate() {
 // Persists the per-swagger specs file (output/{id}/specs.json).
 async function onSaveSpecs() {
   if (!currentSwagger) return;
+  // Fold the token + request body entered in Try It into the specs before saving.
+  captureTryItAuth();
+  captureTryItBody();
   const saved = await specsStore.saveSpecs();
   flashButton('btn-save-specs', 'Save Specs', saved ? 'Saved ✓' : 'Dev server off');
 }
