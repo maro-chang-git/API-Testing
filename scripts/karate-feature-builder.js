@@ -26,7 +26,6 @@ const CATEGORY_LABEL = {
 export async function exportKarate(profile, operation, spec, testCases, swaggerId) {
   const method     = profile.method;
   const hasBody    = ['POST', 'PUT', 'PATCH'].includes(method);
-  const baseUrl    = effectiveBaseUrl(spec);
   const cookieAuth = isCookieAuth(profile.auth_type);
 
   // Valid-body example: the specs request body (user-edited) or the schema example.
@@ -39,24 +38,34 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
 
   lines.push(`Feature: ${method} ${profile.path} — ${profile.summary || 'API Tests'}`);
   lines.push('');
+  lines.push(`  # Endpoint: ${method} ${profile.path}`);
+  lines.push(`  # Auth: ${profile.auth_required
+    ? `${cookieAuth ? 'session cookie' : 'Bearer token'} (configured in karate-config.js)`
+    : 'none'}`);
+  if (operation.externalDocs?.url) lines.push(`  # Doc: ${operation.externalDocs.url}`);
+  lines.push('');
   lines.push('  Background:');
-  lines.push(`    * url '${baseUrl}'`);
+  // Shared config (baseUrl, accept, contentType, readTimeout, credentials) comes
+  // from karate-config.js — see buildKarateConfig() — so it's set in one place
+  // for every feature in the folder instead of hardcoded per file.
+  lines.push('    * url baseUrl');
+  lines.push('    * configure readTimeout = readTimeout');
 
-  const auth = effectiveAuth();
-  if (profile.auth_required) {
-    if (cookieAuth) {
-      lines.push(`    * def sessionToken   = '${auth.token        || '<replace-with-valid-session-token>'}'`);
-      lines.push(`    * def expiredSession = '${auth.expiredToken  || '<replace-with-expired-session-token>'}'`);
-    } else {
-      lines.push(`    * def token        = '${auth.token        || '<replace-with-valid-bearer-token>'}'`);
-      lines.push(`    * def expiredToken = '${auth.expiredToken  || '<replace-with-expired-bearer-token>'}'`);
-    }
-  }
+  // Default headers applied to every request. Auth-category scenarios override
+  // this map (see authHeaderOverride); all others inherit it.
+  const defaultAuthClause = profile.auth_required
+    ? (cookieAuth ? `Cookie: 'session=' + sessionToken` : `Authorization: 'Bearer ' + token`)
+    : null;
+  lines.push(`    * configure headers = ${headersMapExpr({ contentType: hasBody, auth: defaultAuthClause })}`);
+
   const pathParamDefaults = effectivePathParams(method, profile.path);
-  pathParamNames.forEach(n => {
-    const val = pathParamDefaults[n] || `<replace-with-${n}>`;
-    lines.push(`    * def ${n} = '${val}'`);
-  });
+  if (pathParamNames.length) {
+    lines.push('');
+    pathParamNames.forEach(n => {
+      const val = pathParamDefaults[n] || `<replace-with-${n}>`;
+      lines.push(`    * def ${n} = '${val}'`);
+    });
+  }
 
   if (bodyVars.length) {
     lines.push('');
@@ -80,6 +89,8 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
     });
   });
 
+  // Write the shared config beside the feature (once — preserves user edits).
+  await ensureKarateConfigFile(swaggerId, buildKarateConfig(spec, cookieAuth));
   return download(lines.join('\n'), method, profile.path, swaggerId);
 }
 
@@ -89,15 +100,16 @@ function buildScenario(tc, profile, method, hasBody, validBodyExpr, exampleObj, 
   const reqMethod  = tc.disallowed_method ?? method;
   const reqHasBody = tc.disallowed_method ? ['POST', 'PUT', 'PATCH'].includes(reqMethod) : hasBody;
 
-  lines.push(`  @${tc.category}`);
+  lines.push(`  @${tc.id} @${tc.category}`);
   lines.push(`  Scenario: ${tc.id} — ${tc.purpose}`);
-  lines.push(`    Given path ${buildKaratePath(profile.path)}`);
-  const headers = effectiveHeaders();
-  lines.push(`    And header Accept = '${headers.accept}'`);
-  if (reqHasBody) lines.push(`    And header Content-Type = '${headers.contentType}'`);
 
-  const authLine = resolveAuthLine(tc, profile, cookieAuth);
-  if (authLine) lines.push(`    ${authLine}`);
+  // Accept / Content-Type / valid auth are inherited from the Background
+  // `configure headers`. Auth-category cases re-configure that map to send a
+  // missing / invalid / expired credential; everything else inherits it as-is.
+  const authOverride = authHeaderOverride(tc, cookieAuth, reqHasBody);
+  if (authOverride) lines.push(`    ${authOverride}`);
+
+  lines.push(`    Given path ${buildKaratePath(profile.path)}`);
 
   if (reqHasBody) buildKarateBodyLines(tc, validBodyExpr, exampleObj).forEach(l => lines.push(l));
 
@@ -126,21 +138,29 @@ function buildKaratePath(path) {
   return segments.join(', ');
 }
 
-function resolveAuthLine(tc, profile, cookieAuth) {
-  const invalid = effectiveAuth().invalidTokenValue;
-  if (tc.category === 'auth') {
-    if (tc.auth_status === 'invalid') return cookieAuth
-      ? `And header Cookie = 'session=${invalid}'`
-      : `And header Authorization = 'Bearer ${invalid}'`;
-    if (tc.auth_status === 'expired') return cookieAuth
-      ? `And header Cookie = 'session=' + expiredSession`
-      : `And header Authorization = 'Bearer ' + expiredToken`;
-    return null; // missing auth → no header
+// Auth-category scenarios re-`configure headers` to override the Background
+// default with a bad credential (or none). Returns the override step, or null
+// when the case should keep the Background headers (every non-auth case).
+function authHeaderOverride(tc, cookieAuth, reqHasBody) {
+  if (tc.category !== 'auth') return null;
+  let authClause = null;
+  if (tc.auth_status === 'invalid') {
+    authClause = cookieAuth ? `Cookie: 'session=' + invalidToken` : `Authorization: 'Bearer ' + invalidToken`;
+  } else if (tc.auth_status === 'expired') {
+    authClause = cookieAuth ? `Cookie: 'session=' + expiredSession` : `Authorization: 'Bearer ' + expiredToken`;
   }
-  if (profile.auth_required) return cookieAuth
-    ? `And header Cookie = 'session=' + sessionToken`
-    : `And header Authorization = 'Bearer ' + token`;
-  return null;
+  // 'missing' (and the 403 insufficient-permissions case) send no auth header.
+  return `* configure headers = ${headersMapExpr({ contentType: reqHasBody, auth: authClause })}`;
+}
+
+// A Karate JS map literal for `configure headers`, e.g.
+//   ({ Accept: accept, 'Content-Type': contentType, Authorization: 'Bearer ' + token })
+// `accept` / `contentType` and the credentials resolve to karate-config.js vars.
+function headersMapExpr({ contentType, auth }) {
+  const parts = [`Accept: accept`];
+  if (contentType) parts.push(`'Content-Type': contentType`);
+  if (auth) parts.push(auth);
+  return `({ ${parts.join(', ')} })`;
 }
 
 // ── Assertions ─────────────────────────────────────────────────────────────────
@@ -272,6 +292,81 @@ function karateValueLiteral(val) {
   if (typeof val === 'string')  return `'${val.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
   if (typeof val === 'object')  return JSON.stringify(val);
   return String(val);
+}
+
+// ── Shared config (karate-config.js) ───────────────────────────────────────────
+
+// Renders a karate-config.js for the export folder. Karate loads it before every
+// Scenario and the returned map becomes global variables (baseUrl, accept,
+// contentType, readTimeout, credentials) for every .feature beside it — so the
+// per-file Background can stay free of hardcoded URLs and tokens.
+function buildKarateConfig(spec, cookieAuth) {
+  const baseUrl = effectiveBaseUrl(spec);
+  const headers = effectiveHeaders();
+  const auth    = effectiveAuth();
+  const readTimeout = 60000;
+
+  const validCred   = auth.token        || (cookieAuth ? '<replace-with-valid-session-token>'   : '<replace-with-valid-bearer-token>');
+  const expiredCred = auth.expiredToken || (cookieAuth ? '<replace-with-expired-session-token>' : '<replace-with-expired-bearer-token>');
+  const invalidCred = auth.invalidTokenValue || 'invalid_token_tampered_xyz';
+
+  const authLines = cookieAuth
+    ? [
+        `    sessionToken:   ${karateValueLiteral(validCred)},`,
+        `    expiredSession: ${karateValueLiteral(expiredCred)},`,
+        `    invalidToken:   ${karateValueLiteral(invalidCred)},`,
+      ]
+    : [
+        `    token:        ${karateValueLiteral(validCred)},`,
+        `    expiredToken: ${karateValueLiteral(expiredCred)},`,
+        `    invalidToken: ${karateValueLiteral(invalidCred)},`,
+      ];
+
+  return [
+    `/**`,
+    ` * Shared Karate configuration — loaded automatically before every Scenario.`,
+    ` * The returned map is exposed as global variables to every .feature in this`,
+    ` * folder. Edit the base URL / credentials below for your environment.`,
+    ` *`,
+    ` * Generated once by the API test tool and NOT overwritten on later exports,`,
+    ` * so edits made here are safe. Switch environments with -Dkarate.env=<name>.`,
+    ` */`,
+    `function fn() {`,
+    `  var env = karate.env || 'dev';`,
+    ``,
+    `  var config = {`,
+    `    baseUrl:     ${karateValueLiteral(baseUrl)},`,
+    `    accept:      ${karateValueLiteral(headers.accept)},`,
+    `    contentType: ${karateValueLiteral(headers.contentType)},`,
+    `    readTimeout: ${readTimeout},`,
+    ...authLines,
+    `  };`,
+    ``,
+    `  // Per-environment overrides — run with: mvn test -Dkarate.env=staging`,
+    `  if (env === 'staging') {`,
+    `    // config.baseUrl = 'https://staging.example.com';`,
+    `  }`,
+    ``,
+    `  karate.configure('connectTimeout', 30000);`,
+    ``,
+    `  return config;`,
+    `}`,
+    ``,
+  ].join('\n');
+}
+
+// Writes karate-config.js beside the feature files — but only when it's absent,
+// so hand-edited credentials / URLs survive re-exports. Falls back to a browser
+// download when the dev server isn't running.
+async function ensureKarateConfigFile(swaggerId, content) {
+  const relPath = `output/${swaggerId}/karate/karate-config.js`;
+  try {
+    const res = await fetch(relPath, { cache: 'no-store' });
+    if (res.ok) return;   // already present — keep the user's edits
+  } catch {
+    // dev server down — fall through to save (which itself falls back to download)
+  }
+  await saveOrDownload(relPath, 'karate-config.js', content, 'application/javascript');
 }
 
 // ── Download ──────────────────────────────────────────────────────────────────
