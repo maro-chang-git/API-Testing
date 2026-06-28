@@ -1,5 +1,5 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './core/swagger-loader.js';
-import { profileEndpoint, matchTemplates, getOperation } from './core/template-matcher.js';
+import { profileEndpoint, matchTemplates, getOperation, authEnforced } from './core/template-matcher.js';
 import { initRequestBuilder, resetRequestBuilder, runTestCase, setOnResponse, captureTryItAuth, captureTryItBody } from './tryit/request-ui.js';
 import { exportPostman } from './exporters/postman-collection-builder.js';
 import { exportKarate } from './exporters/karate-feature-builder.js';
@@ -139,6 +139,11 @@ function onEndpointChange(value) {
   results = resultsStore[currentEndpointKey] ||= {};
 
   currentProfile   = profileEndpoint(path, method, operation, currentSpec);
+  // Honor a per-endpoint auth-required override from specs.json (set by Try It
+  // auth discovery or hand-edited) — the spec often marks auth as optional when
+  // the endpoint really enforces it.
+  currentProfile.auth_required =
+    specsStore.effectiveAuthRequired(method, path, currentProfile.auth_required);
   currentOperation = operation;
   matchedCases     = matchTemplates(currentProfile, templates);
 
@@ -182,8 +187,17 @@ function handleTryItResponse({ status, body }) {
   if (sampleBody)   sampleBody.value = body;
   if (sampleStatus) sampleStatus.value = status;
 
-  const generated = generateTestCasesFromResponse({ status, body, profile: currentProfile });
   const notice = document.getElementById('rb-gen-notice');
+
+  // A 401/403 proves this endpoint enforces auth even though the spec marked it
+  // optional/anonymous — flip it, add the auth test cases, and stop (an error
+  // response is not a useful baseline for data-driven generation).
+  if (authEnforced(status) && !currentProfile.auth_required) {
+    enableAuthCases(status, notice);
+    return;
+  }
+
+  const generated = generateTestCasesFromResponse({ status, body, profile: currentProfile });
   if (!notice) return;
 
   if (!generated.length) {
@@ -214,6 +228,28 @@ function generateFromSample() {
     return;
   }
   foldGeneratedCases(generated, notice);
+}
+
+// Marks the current endpoint auth-required (a live 401/403 revealed it enforces
+// auth despite the spec), merges in the now-matching auth-category cases without
+// disturbing existing template/folded cases, and notifies. The flag is recorded
+// in the specs model so Save Specs persists it and reload keeps the auth cases.
+function enableAuthCases(status, noticeEl) {
+  const { method, path } = currentProfile;
+  currentProfile.auth_required = true;
+  specsStore.setAuthRequired(method, path, true);
+
+  const authCases = matchTemplates(currentProfile, templates).filter(c => c.category === 'auth');
+  const have = new Set(matchedCases.map(c => c.id));
+  const added = authCases.filter(c => !have.has(c.id));
+  matchedCases = [...matchedCases, ...added];
+
+  applyFiltersAndRender();
+
+  if (noticeEl) {
+    noticeEl.style.display = '';
+    noticeEl.innerHTML = `<span class="rb-gen-icon">🔒</span> This endpoint returned <strong>${status}</strong> — added ${added.length} authentication test case${added.length === 1 ? '' : 's'}. Click <strong>Save Specs</strong> to persist.`;
+  }
 }
 
 // Fold generated cases into the current endpoint (see generate/case-folder.js),

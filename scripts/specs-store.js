@@ -164,6 +164,14 @@ export function effectiveAuth() {
   };
 }
 
+// Effective auth-required flag for an endpoint: the specs value (set by Try It
+// auth discovery or hand-edited) when present, otherwise the spec-derived
+// fallback. Lets a per-endpoint override force auth tests on/off regardless of
+// what the swagger declared.
+export function effectiveAuthRequired(method, path, fallback) {
+  return getEndpointSpecs(method, path)?.authRequired ?? fallback;
+}
+
 export function effectiveHeaders() {
   const cfg = getConfig();
   const h = _model?.swagger?.headers;
@@ -210,6 +218,17 @@ export function setRequestBody(method, path, body) {
   const key = specKey(method, path);
   const e = (_model.endpoints[key] ||= { method: String(method).toUpperCase(), path });
   e.requestBody = body;
+  _model.updatedAt = new Date().toISOString();
+}
+
+// Marks an endpoint as (not) requiring auth — set when a live Try It response
+// (401/403) reveals the endpoint enforces auth even though the spec said
+// otherwise. Persisted on Save Specs so the auth tests reappear on reload.
+export function setAuthRequired(method, path, value) {
+  if (!_model) return;
+  const key = specKey(method, path);
+  const e = (_model.endpoints[key] ||= { method: String(method).toUpperCase(), path });
+  e.authRequired = value;
   _model.updatedAt = new Date().toISOString();
 }
 

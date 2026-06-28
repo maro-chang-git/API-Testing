@@ -101,6 +101,15 @@ export function testCaseId(templateId) {
 }
 
 /**
+ * A 401/403 response proves the endpoint enforces auth regardless of what the
+ * spec declared (specs often mark auth as optional/anonymous when it isn't).
+ * Used to auto-flip an endpoint to auth-required from a live Try It response.
+ */
+export function authEnforced(status) {
+  return status === 401 || status === 403;
+}
+
+/**
  * Looks up a single operation from a swagger spec by path + method.
  * Returns null if not found.
  */
