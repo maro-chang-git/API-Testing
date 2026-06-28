@@ -1,8 +1,8 @@
 # API Test Cases Viewer
 
-An interactive, dependency-free browser tool that generates test cases for any REST API endpoint by matching a general-purpose template library against a selected Swagger / OpenAPI spec — then lets you run the cases directly in the browser and export them to **JSON**, **Postman**, or **Karate**.
+An interactive browser tool that generates test cases for any REST API endpoint by matching a general-purpose template library against a selected Swagger / OpenAPI spec — then lets you run the cases directly in the browser and export them to **JSON**, **Postman**, or **Karate**.
 
-No build step, no npm install — it's plain ES modules served as static files.
+Pure ES modules with no build step. Dev tooling (Vite, ESLint) is available via npm but not required to open the app.
 
 ## Features
 
@@ -32,6 +32,8 @@ No build step, no npm install — it's plain ES modules served as static files.
 ```
 API Testing/
 ├── index.html                          # Entry point — Test Cases + Try It tabs
+├── package.json                        # npm dev dependencies (Vite, ESLint)
+├── vite.config.js                      # Vite dev server — proxies /proxy & /save to Python server
 ├── css/
 │   └── styles.css                      # All styles
 ├── scripts/
@@ -61,7 +63,7 @@ API Testing/
 └── README.md
 ```
 
-> `swaggers/*`, `output/*`, and `TODO.md` are git-ignored — see `.gitignore`.
+> `swaggers/*`, `output/*`, `node_modules/`, and `TODO.md` are git-ignored — see `.gitignore`.
 
 ## Architecture & data flow
 
@@ -312,15 +314,24 @@ These values seed the Try It defaults and the Postman/Karate exports (e.g. the `
 
 ## Running the viewer
 
-It's a static site — serve the folder over HTTP. Use `devserver.py`, which serves
-the files **and** exposes the `/proxy?url=` CORS proxy used by the **🔗 Proxy** button:
+Two servers must run in parallel — Vite serves static files and the Python server handles CORS proxying and file saves.
 
-```powershell
-$env:PORT = 5500
-& "C:\Program Files\Python314\python.exe" .claude\devserver.py
+**Terminal 1 — Vite dev server (port 5500):**
+```cmd
+npm run dev
 ```
 
-Open **http://localhost:5500/index.html** in your browser. Press `Ctrl+C` to stop.
+**Terminal 2 — Python save/proxy server (port 5501):**
+```cmd
+npm run save-server
+```
 
-> Plain `python -m http.server 5500` also serves the page, but the **🔗 Proxy**
-> button won't work without `devserver.py` providing the `/proxy` endpoint.
+Open **http://localhost:5500/index.html**. Vite proxies `/proxy` and `/save` requests to the Python server automatically.
+
+Without the Python server, the **🔗 Proxy** button and all disk saves (`specs.json`, Postman, Karate exports) silently fall back to browser downloads.
+
+### Install dev dependencies (first time only)
+
+```cmd
+npm install
+```

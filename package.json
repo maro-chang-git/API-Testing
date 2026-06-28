@@ -1,0 +1,26 @@
+{
+  "name": "api-testing",
+  "version": "1.0.0",
+  "description": "An interactive, dependency-free browser tool that generates test cases for any REST API endpoint by matching a general-purpose template library against a selected Swagger / OpenAPI spec — then lets you run the cases directly in the browser and export them to **JSON**, **Postman**, or **Karate**.",
+  "scripts": {
+    "dev": "vite",
+    "save-server": "set PORT=5501 && python .claude/devserver.py",
+    "lint": "eslint scripts/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maro-chang-git/API-Testing.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/maro-chang-git/API-Testing/issues"
+  },
+  "homepage": "https://github.com/maro-chang-git/API-Testing#readme",
+  "devDependencies": {
+    "eslint": "^10.6.0",
+    "vite": "^8.1.0"
+  }
+}
