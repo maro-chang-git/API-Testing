@@ -22,8 +22,8 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
   const cookieAuth = isCookieAuth(profile.auth_type);
 
   // Valid-body example: the specs request body (user-edited) or the schema example.
-  const exampleObj = hasBody ? effectiveRequestBody(method, profile.path, operation, spec) : null;
-  const { bodyVars, validBodyExpr } = buildBodyVars(exampleObj);
+  const exampleObj    = hasBody ? effectiveRequestBody(method, profile.path, operation, spec) : null;
+  const validBodyExpr = inlineValidBody(exampleObj);
 
   const pathParams = pathParamNames(profile.path);
 
@@ -44,8 +44,8 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
   lines.push('    * url baseUrl');
   lines.push('    * configure readTimeout = readTimeout');
 
-  // Default headers applied to every request. Auth-category scenarios override
-  // this map (see authHeaderOverride); all others inherit it.
+  // Default headers applied to every request. The auth Scenario Outline overrides
+  // this map per-row (see buildAuthOutline); all others inherit it.
   const defaultAuthClause = profile.auth_required
     ? (cookieAuth ? `Cookie: 'session=' + sessionToken` : `Authorization: 'Bearer ' + token`)
     : null;
@@ -60,9 +60,10 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
     });
   }
 
-  if (bodyVars.length) {
+  // Karate payloads read best as one inline object literal (not field-by-field
+  // variables — that's a Postman collection-variable idiom that doesn't fit here).
+  if (validBodyExpr) {
     lines.push('');
-    bodyVars.forEach(({ key, value }) => lines.push(`    * def ${key} = ${karateValueLiteral(value)}`));
     lines.push(`    * def validBody = ${validBodyExpr}`);
   }
   lines.push('');
@@ -76,10 +77,29 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
     const label = CATEGORY_LABEL[cat] ?? cat;
     lines.push(`  # ── ${label} ${'─'.repeat(Math.max(0, 68 - label.length))}`);
     lines.push('');
-    cases.forEach(tc => {
-      buildScenario(tc, profile, method, hasBody, validBodyExpr, exampleObj, cookieAuth, lines);
+
+    // The auth cases differ only by credential + expected status, so they fold into
+    // a single data-driven Scenario Outline instead of one near-identical copy each.
+    if (cat === 'auth') {
+      buildAuthOutline(cases, profile, method, hasBody, cookieAuth, lines);
+      lines.push('');
+      return;
+    }
+
+    // The 405 cases (one per disallowed method) likewise collapse into one outline;
+    // any other negative case keeps its own Scenario (distinct body / status).
+    const outlineCases    = cases.filter(tc => tc.disallowed_method);
+    const individualCases = cases.filter(tc => !tc.disallowed_method);
+
+    individualCases.forEach(tc => {
+      buildScenario(tc, profile, method, hasBody, validBodyExpr, exampleObj, lines);
       lines.push('');
     });
+
+    if (outlineCases.length) {
+      buildMethodNotAllowedOutline(outlineCases, profile, lines);
+      lines.push('');
+    }
   });
 
   // Write the shared config beside the feature (once — preserves user edits).
@@ -89,35 +109,94 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
 
 // ── Scenario ──────────────────────────────────────────────────────────────────
 
-function buildScenario(tc, profile, method, hasBody, validBodyExpr, exampleObj, cookieAuth, lines) {
-  const reqMethod  = tc.disallowed_method ?? method;
-  const reqHasBody = tc.disallowed_method ? methodHasBody(reqMethod) : hasBody;
-
+function buildScenario(tc, profile, method, hasBody, validBodyExpr, exampleObj, lines) {
   lines.push(`  @${tc.id} @${tc.category}`);
   lines.push(`  Scenario: ${tc.id} — ${tc.purpose}`);
 
-  // Accept / Content-Type / valid auth are inherited from the Background
-  // `configure headers`. Auth-category cases re-configure that map to send a
-  // missing / invalid / expired credential; everything else inherits it as-is.
-  const authOverride = authHeaderOverride(tc, cookieAuth, reqHasBody);
-  if (authOverride) lines.push(`    ${authOverride}`);
-
+  // Accept / Content-Type / valid auth are all inherited from the Background
+  // `configure headers`; these per-case scenarios only vary the request body.
   lines.push(`    Given path ${buildKaratePath(profile.path)}`);
 
-  if (reqHasBody) buildKarateBodyLines(tc, validBodyExpr, exampleObj).forEach(l => lines.push(l));
+  if (hasBody) buildKarateBodyLines(tc, validBodyExpr, exampleObj).forEach(l => lines.push(l));
 
-  lines.push(`    When method ${reqMethod.toLowerCase()}`);
+  lines.push(`    When method ${method.toLowerCase()}`);
   // Karate's `status` step takes a single code; when a case accepts several,
-  // assert the built-in responseStatus is one of them instead.
+  // match the built-in responseStatus against the allowed set.
   const statuses = expectedStatuses(tc.expected_status);
   if (statuses.length === 1) {
     lines.push(`    Then status ${statuses[0]}`);
   } else {
-    lines.push(`    Then assert ${statuses.map(s => `responseStatus == ${s}`).join(' || ')}`);
+    lines.push(`    Then match [${statuses.join(', ')}] contains responseStatus`);
   }
   lines.push(`    * assert responseTime < ${getConfig().responseTimeThresholdMs}`);
 
   buildKarateAssertions(tc, method, lines);
+}
+
+// ── Scenario Outlines (data-driven groups) ─────────────────────────────────────
+
+// All 405 cases differ only by the disallowed HTTP verb, so they collapse into a
+// single Scenario Outline. A 405 is decided at the method layer, so no request
+// body is sent regardless of the verb.
+function buildMethodNotAllowedOutline(cases, profile, lines) {
+  lines.push(`  @negative @method-not-allowed`);
+  lines.push(`  Scenario Outline: <id> — Return 405 when an HTTP method is not allowed (<verb>)`);
+  lines.push(`    Given path ${buildKaratePath(profile.path)}`);
+  lines.push(`    When method <verb>`);
+  lines.push(`    Then status 405`);
+  lines.push(`    * assert responseTime < ${getConfig().responseTimeThresholdMs}`);
+  lines.push(`    * match response == '#object'`);
+  lines.push(`    * assert response.message || response.error || response.detail`);
+  lines.push('');
+  lines.push(`    Examples:`);
+  const rows = cases.map(tc => [tc.id, tc.disallowed_method.toLowerCase()]);
+  renderExamplesTable(['id', 'verb'], rows).forEach(l => lines.push(l));
+}
+
+// The auth cases share one request shape and differ only by the credential sent and
+// the expected status. Each Examples row supplies the Authorization/Cookie value via
+// a Karate embedded expression (`#(...)`), with `#(null)` driving the missing-header
+// case; the configure-headers step adds the credential only when it isn't null.
+function buildAuthOutline(cases, profile, method, hasBody, cookieAuth, lines) {
+  const headerName = cookieAuth ? 'Cookie' : 'Authorization';
+  const base       = hasBody ? `Accept: accept, 'Content-Type': contentType` : `Accept: accept`;
+
+  lines.push(`  @auth`);
+  lines.push(`  Scenario Outline: <id> — <desc>`);
+  lines.push(`    * configure headers = (authValue == null ? ({ ${base} }) : ({ ${base}, ${headerName}: authValue }))`);
+  lines.push(`    Given path ${buildKaratePath(profile.path)}`);
+  if (hasBody) lines.push(`    And request validBody`);
+  lines.push(`    When method ${method.toLowerCase()}`);
+  lines.push(`    Then status <status>`);
+  lines.push(`    * assert responseTime < ${getConfig().responseTimeThresholdMs}`);
+  lines.push(`    * match response == '#object'`);
+  lines.push(`    * assert response.message || response.error || response.detail`);
+  lines.push('');
+  lines.push(`    Examples:`);
+  const rows = cases.map(tc => [
+    tc.id,
+    authValueCell(tc.auth_status, cookieAuth),
+    String(expectedStatuses(tc.expected_status)[0]),
+    String(tc.purpose).replace(/\|/g, '/'),
+  ]);
+  renderExamplesTable(['id', 'authValue', 'status', 'desc'], rows).forEach(l => lines.push(l));
+}
+
+// The Examples cell for an auth row's credential, as a Karate embedded expression
+// resolving against the karate-config.js vars. Missing / insufficient-permission
+// cases send no credential (`#(null)`).
+function authValueCell(authStatus, cookieAuth) {
+  const wrap = cookieAuth ? v => `'session=' + ${v}` : v => `'Bearer ' + ${v}`;
+  if (authStatus === 'invalid') return `#(${wrap('invalidToken')})`;
+  if (authStatus === 'expired') return `#(${wrap(cookieAuth ? 'expiredSession' : 'expiredToken')})`;
+  return `#(null)`;
+}
+
+// Renders an aligned Karate Examples table (header row + data rows).
+function renderExamplesTable(headers, rows) {
+  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map(r => r[i].length)));
+  const fmt = cells => `      | ${cells.map((c, i) => c.padEnd(widths[i])).join(' | ')} |`;
+  return [fmt(headers), ...rows.map(fmt)];
 }
 
 // Build the path expression for Karate's `Given path` step.
@@ -129,21 +208,6 @@ function buildKaratePath(path) {
     return m ? m[1] : `'${seg}'`;
   });
   return segments.join(', ');
-}
-
-// Auth-category scenarios re-`configure headers` to override the Background
-// default with a bad credential (or none). Returns the override step, or null
-// when the case should keep the Background headers (every non-auth case).
-function authHeaderOverride(tc, cookieAuth, reqHasBody) {
-  if (tc.category !== 'auth') return null;
-  let authClause = null;
-  if (tc.auth_status === 'invalid') {
-    authClause = cookieAuth ? `Cookie: 'session=' + invalidToken` : `Authorization: 'Bearer ' + invalidToken`;
-  } else if (tc.auth_status === 'expired') {
-    authClause = cookieAuth ? `Cookie: 'session=' + expiredSession` : `Authorization: 'Bearer ' + expiredToken`;
-  }
-  // 'missing' (and the 403 insufficient-permissions case) send no auth header.
-  return `* configure headers = ${headersMapExpr({ contentType: reqHasBody, auth: authClause })}`;
 }
 
 // A Karate JS map literal for `configure headers`, e.g.
@@ -175,7 +239,7 @@ function buildKarateAssertions(tc, method, lines) {
     }
   } else if (is4xx(primary)) {
     lines.push(`    * match response == '#object'`);
-    lines.push(`    * assert response.message != null || response.error != null || response.detail != null`);
+    lines.push(`    * assert response.message || response.error || response.detail`);
   }
 
   // Folded-in assertions derived from an observed response body.
@@ -252,23 +316,17 @@ function karateInlineJson(obj) {
   return `{ ${pairs.join(', ')} }`;
 }
 
-// ── Body variables ────────────────────────────────────────────────────────────
+// ── Valid body ──────────────────────────────────────────────────────────────────
 
-// Mirrors postman-collection-builder's buildBodies():
-// Decomposes a plain object into individual field variables and a JS object
-// expression that composes them. Non-object bodies (arrays, scalars) fall back
-// to a single `validBody` def holding the raw value.
-function buildBodyVars(exampleObj) {
-  if (exampleObj == null) return { bodyVars: [], validBodyExpr: null };
-
+// The right-hand side for the Background's `* def validBody`. Plain objects render
+// as a single inline Karate JSON literal; arrays / scalars fall back to raw JSON.
+// Returns null when the endpoint sends no body.
+function inlineValidBody(exampleObj) {
+  if (exampleObj == null) return null;
   if (typeof exampleObj !== 'object' || Array.isArray(exampleObj)) {
-    return { bodyVars: [], validBodyExpr: JSON.stringify(exampleObj) };
+    return JSON.stringify(exampleObj);
   }
-
-  const entries  = Object.entries(exampleObj);
-  const bodyVars = entries.map(([key, value]) => ({ key, value }));
-  const fields   = entries.map(([key]) => `${key}: ${key}`).join(', ');
-  return { bodyVars, validBodyExpr: `({ ${fields} })` };
+  return karateInlineJson(exampleObj);
 }
 
 // Format a JS value as a Karate `def` right-hand side.
