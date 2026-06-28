@@ -1,4 +1,4 @@
-import SwaggerParser from './vendor/swagger-parser.js';
+import SwaggerParser from '../vendor/swagger-parser.js';
 
 /**
  * Fetches the list of available swagger files from swaggers/index.json.

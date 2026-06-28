@@ -1,5 +1,9 @@
 swaggers/*
 output/*
 node_modules/*
+tests/*
+context/*
+.mcp.json
 TODO.md
 CLAUDE.md
+

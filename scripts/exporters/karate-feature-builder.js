@@ -1,18 +1,11 @@
-import { isCookieAuth } from './request-builder.js';
-import { CATEGORY_ORDER } from './postman-collection-builder.js';
-import { getConfig } from './config-loader.js';
-import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectivePathParams, effectiveRequestBody, saveOrDownload } from './specs-store.js';
+import { isCookieAuth } from '../tryit/request-core.js';
+import { CATEGORY_ORDER, CATEGORY_LABEL } from '../core/case-order.js';
+import { getConfig } from '../core/config-loader.js';
+import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectivePathParams, effectiveRequestBody, saveOrDownload } from '../specs-store.js';
 import { getTestBody, BODY_KIND } from './body-builder.js';
-import { expectedStatuses } from './template-matcher.js';
-
-const CATEGORY_LABEL = {
-  happy_path: 'Happy Path',
-  positive:   'Positive',
-  negative:   'Negative',
-  auth:       'Auth',
-  boundary:   'Boundary',
-  generated:  'Generated (from response)',
-};
+import { expectedStatuses } from '../core/template-matcher.js';
+import { is2xx, is4xx } from '../core/status-utils.js';
+import { normalizeAssertion, pathParamNames, methodHasBody, filenameSlug } from './export-shared.js';
 
 /**
  * Builds a Karate .feature file from the current endpoint state
@@ -25,14 +18,14 @@ const CATEGORY_LABEL = {
  */
 export async function exportKarate(profile, operation, spec, testCases, swaggerId) {
   const method     = profile.method;
-  const hasBody    = ['POST', 'PUT', 'PATCH'].includes(method);
+  const hasBody    = methodHasBody(method);
   const cookieAuth = isCookieAuth(profile.auth_type);
 
   // Valid-body example: the specs request body (user-edited) or the schema example.
   const exampleObj = hasBody ? effectiveRequestBody(method, profile.path, operation, spec) : null;
   const { bodyVars, validBodyExpr } = buildBodyVars(exampleObj);
 
-  const pathParamNames = [...profile.path.matchAll(/\{([^}]+)\}/g)].map(m => m[1]);
+  const pathParams = pathParamNames(profile.path);
 
   const lines = [];
 
@@ -59,9 +52,9 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
   lines.push(`    * configure headers = ${headersMapExpr({ contentType: hasBody, auth: defaultAuthClause })}`);
 
   const pathParamDefaults = effectivePathParams(method, profile.path);
-  if (pathParamNames.length) {
+  if (pathParams.length) {
     lines.push('');
-    pathParamNames.forEach(n => {
+    pathParams.forEach(n => {
       const val = pathParamDefaults[n] || `<replace-with-${n}>`;
       lines.push(`    * def ${n} = '${val}'`);
     });
@@ -98,7 +91,7 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
 
 function buildScenario(tc, profile, method, hasBody, validBodyExpr, exampleObj, cookieAuth, lines) {
   const reqMethod  = tc.disallowed_method ?? method;
-  const reqHasBody = tc.disallowed_method ? ['POST', 'PUT', 'PATCH'].includes(reqMethod) : hasBody;
+  const reqHasBody = tc.disallowed_method ? methodHasBody(reqMethod) : hasBody;
 
   lines.push(`  @${tc.id} @${tc.category}`);
   lines.push(`  Scenario: ${tc.id} — ${tc.purpose}`);
@@ -168,21 +161,19 @@ function headersMapExpr({ contentType, auth }) {
 function buildKarateAssertions(tc, method, lines) {
   const statuses = expectedStatuses(tc.expected_status);
   const primary  = statuses[0];
-  const is2xx    = primary >= 200 && primary < 300;
-  const is4xx    = primary >= 400 && primary < 500;
   const folded   = tc.generatedAssertions ?? [];
 
   if (tc.assertion) {
     const line = karateAssertLine(tc.assertion);
     if (line) lines.push(`    ${line}`);
-  } else if (is2xx) {
+  } else if (is2xx(primary)) {
     // A folded array-root assertion will assert `response == '#array'`; skip the
     // generic object match so the scenario doesn't contradict itself.
     if (!folded.some(a => a.kind === 'array-root')) lines.push(`    * match response == '#object'`);
     if (method === 'POST' && statuses.includes(201)) {
       lines.push(`    * match response.id == '#notnull'`);
     }
-  } else if (is4xx) {
+  } else if (is4xx(primary)) {
     lines.push(`    * match response == '#object'`);
     lines.push(`    * assert response.message != null || response.error != null || response.detail != null`);
   }
@@ -195,21 +186,15 @@ function buildKarateAssertions(tc, method, lines) {
 }
 
 function karateAssertLine(a) {
-  if (a.kind === 'array-root') return `* match response == '#array'`;
-  if (a.kind === 'field'      && isSimpleKey(a.path)) return `* match response.${a.path} == '#notnull'`;
-  if (a.kind === 'count'      && isSimpleKey(a.path)) return `* match response.${a.path} == '#array'`;
-  if (a.kind === 'item-field') {
-    const collKey = parseCollectionKey(a.collection);
-    if (collKey && isSimpleKey(a.path)) return `* match response.${collKey}[0].${a.path} == '#notnull'`;
+  const n = normalizeAssertion(a);
+  if (!n) return null;
+  switch (n.kind) {
+    case 'array-root': return `* match response == '#array'`;
+    case 'field':      return `* match response.${n.path} == '#notnull'`;
+    case 'count':      return `* match response.${n.path} == '#array'`;
+    case 'item-field': return `* match response.${n.collKey}[0].${n.path} == '#notnull'`;
+    default:           return null;
   }
-  return null;
-}
-
-function isSimpleKey(k) { return /^[A-Za-z_][A-Za-z0-9_]*$/.test(k); }
-
-function parseCollectionKey(base) {
-  const m = /^([A-Za-z_][A-Za-z0-9_]*)\[0\]$/.exec(base || '');
-  return m ? m[1] : null;
 }
 
 // ── Per-scenario request body ─────────────────────────────────────────────────
@@ -374,7 +359,6 @@ async function ensureKarateConfigFile(swaggerId, content) {
 // Writes the feature to output/{id}/karate/ via the dev-server save endpoint,
 // falling back to a browser download when it isn't running.
 function download(content, method, path, swaggerId) {
-  const slug     = path.replace(/^\//, '').replace(/\//g, '-').replace(/[{}]/g, '').replace(/-+/g, '-');
-  const filename = `karate-${method.toLowerCase()}-${slug}.feature`;
+  const filename = `karate-${method.toLowerCase()}-${filenameSlug(path)}.feature`;
   return saveOrDownload(`output/${swaggerId}/karate/${filename}`, filename, content, 'text/plain');
 }

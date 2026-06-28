@@ -1,12 +1,18 @@
-import { getConfig } from './config-loader.js';
-import { expectedStatuses } from './template-matcher.js';
-import * as specsStore from './specs-store.js';
-import Ajv from './vendor/ajv/ajv.js';
-import addFormats from './vendor/ajv/ajv-formats.js';
+import { getConfig } from '../core/config-loader.js';
+import { expectedStatuses } from '../core/template-matcher.js';
+import * as specsStore from '../specs-store.js';
+import { validateResponse } from './schema-validator.js';
+import { isCookieAuth, buildRequestUrl, buildRequestHeaders, buildRequestBody } from './request-core.js';
 
 let _profile   = null;   // endpoint profile from template-matcher
 let _operation = null;   // raw swagger operation object
 let _spec      = null;   // full swagger spec (for basePath/host)
+
+let _swaggerId = null;   // current swagger id — scopes the sticky Try It session
+let _session   = null;   // sticky base URL (incl. proxy toggle) + auth carried
+                         // across endpoint switches within one swagger; dropped
+                         // when the swagger changes. { baseUrl, authType,
+                         // authValue, authKey }
 
 let _activeTc         = null;   // test case currently being run
 let _onSaveResult     = null;   // callback(tcId, {actual_status, elapsed, passed})
@@ -29,9 +35,49 @@ document.getElementById('rb-response')?.addEventListener('click', e => {
   });
 });
 
+// ── Static Try It controls + delegated dynamic buttons (bound once at load) ──
+// Replaces the former inline onclick / window.__rb* globals. Static controls are
+// wired directly; buttons rendered on demand (header rows, the active-TC banner,
+// the save-result button) are reached via event delegation on stable containers.
+document.getElementById('rb-auth-type')?.addEventListener('change', () => toggleAuthInput());
+document.getElementById('rb-add-header-btn')?.addEventListener('click', () => addHeaderRow());
+document.getElementById('rb-send-btn')?.addEventListener('click', () => sendRequest());
+document.getElementById('rb-baseline-btn')?.addEventListener('click', () => saveBaseline());
+document.getElementById('rb-proxy-btn')?.addEventListener('click', () => {
+  const inp = document.getElementById('rb-base-url');
+  const proxy = location.origin + '/proxy?url=';
+  if (inp && !inp.value.startsWith(proxy)) inp.value = proxy + inp.value;
+});
+
+// Remove a custom header row (rows are added dynamically).
+document.getElementById('rb-headers-list')?.addEventListener('click', e => {
+  if (e.target.closest('.rb-remove-btn')) e.target.closest('.rb-header-row')?.remove();
+});
+
+// Clear the active-TC banner (re-rendered each run).
+document.getElementById('rb-active-tc')?.addEventListener('click', e => {
+  if (e.target.closest('.rb-clear-tc')) clearActiveTc();
+});
+
+// Save a run result (the comparison block is re-rendered each send; the result
+// values ride along on data-* attributes of the button).
+document.getElementById('rb-tc-comparison')?.addEventListener('click', e => {
+  const btn = e.target.closest('.rb-save-result-btn');
+  if (!btn) return;
+  saveResult(Number(btn.dataset.actualStatus), Number(btn.dataset.elapsed), btn.dataset.passed === 'true');
+});
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export function initRequestBuilder(profile, operation, spec) {
+export function initRequestBuilder(profile, operation, spec, swaggerId) {
+  // Carry session-level Try It fields (base URL incl. proxy toggle, auth) across
+  // endpoint switches within the same swagger, so the user doesn't re-enter them
+  // for every endpoint. Stash the outgoing endpoint's values before re-rendering;
+  // on a different swagger, drop the session so its fields don't leak across APIs.
+  if (swaggerId === _swaggerId) captureSession();
+  else _session = null;
+  _swaggerId = swaggerId;
+
   _profile   = profile;
   _operation = operation;
   _spec      = spec;
@@ -85,6 +131,23 @@ export function resetRequestBuilder() {
   clearResponse();
 }
 
+// Snapshot the session-level fields (base URL incl. proxy, auth) of the endpoint
+// currently shown, so they can be restored on the next endpoint of this swagger.
+// Skipped when no endpoint is rendered (e.g. after a tag change cleared the panel)
+// so a blank panel can't wipe a good session. Auth-test presets (missing/invalid/
+// expired) are not captured, so a tampered or empty token never becomes sticky.
+function captureSession() {
+  if (!_profile) return;
+  const sess = _session || {};
+  sess.baseUrl = document.getElementById('rb-base-url').value;
+  if (!(_activeTc && _activeTc.category === 'auth')) {
+    sess.authType  = document.getElementById('rb-auth-type').value;
+    sess.authValue = document.getElementById('rb-auth-value').value;
+    sess.authKey   = document.getElementById('rb-auth-key').value;
+  }
+  _session = sess;
+}
+
 // ── Active TC banner ──────────────────────────────────────────────────────────
 
 function renderActiveTcBanner(tc) {
@@ -94,7 +157,7 @@ function renderActiveTcBanner(tc) {
     <span class="rb-tc-id">${tc.id}</span>
     <span class="rb-tc-purpose">${escHtml(tc.purpose)}</span>
     <span class="rb-tc-expected">Expected: <strong>${expectedStatuses(tc.expected_status).join(' or ')}</strong></span>
-    <button class="rb-clear-tc" onclick="window.__rbClearActiveTc()">✕ Clear</button>
+    <button class="rb-clear-tc">✕ Clear</button>
   `;
 }
 
@@ -104,13 +167,6 @@ function clearActiveTcBanner() {
 }
 
 // ── Auth preset from test case ────────────────────────────────────────────────
-
-// Detects cookie-based auth from an endpoint profile's auth_type (the security
-// scheme name, e.g. "cookieAuth" / "session_cookie"). Such endpoints expect
-// credentials in a Cookie header rather than a Bearer Authorization header.
-export function isCookieAuth(authType) {
-  return /cookie/i.test(authType || '');
-}
 
 function applyAuthPreset(tc) {
   const authType  = document.getElementById('rb-auth-type');
@@ -141,21 +197,10 @@ function resetHeadersList() {
 
 // ── Sections ──────────────────────────────────────────────────────────────────
 
-// Builds the API base URL, supporting both Swagger 2 (schemes/host/basePath)
-// and OpenAPI 3 (servers[].url, with {variable} templates filled from each
-// variable's default).
-export function getBaseUrl(spec) {
-  const server = spec?.servers?.[0];
-  if (server?.url) {
-    return server.url.replace(/\{([^}]+)\}/g, (_, name) =>
-      server.variables?.[name]?.default ?? `{${name}}`);
-  }
-  const scheme = spec?.schemes?.[0] ?? 'https';
-  return `${scheme}://${spec?.host ?? ''}${spec?.basePath ?? ''}`;
-}
-
 function renderEndpointInfo() {
-  const baseUrl = specsStore.effectiveBaseUrl(_spec);
+  // Prefer the sticky session base URL (keeps the user's 🔗 Proxy choice across
+  // endpoint switches); fall back to the resolved spec/config/specs value.
+  const baseUrl = _session?.baseUrl || specsStore.effectiveBaseUrl(_spec);
   document.getElementById('rb-base-url').value         = baseUrl;
   document.getElementById('rb-method-badge').textContent  = _profile.method;
   document.getElementById('rb-method-badge').className    = `badge method-${_profile.method}`;
@@ -208,6 +253,17 @@ function renderAuthSection() {
   // Pre-fill from the specs auth when the endpoint requires auth and a token is
   // configured; otherwise leave it as "none" for the user to fill in. The auth
   // style is a best-effort guess from where the credential goes — editable here.
+  // Restore the auth chosen on a previous endpoint of this swagger (sticky across
+  // switches, even before Save Specs). Falls through to the specs-derived default
+  // on the first endpoint of a swagger (when there is no session yet).
+  if (_session?.authType) {
+    typeSel.value = _session.authType;
+    valEl.value   = _session.authValue || '';
+    keyEl.value   = _session.authKey || '';
+    toggleAuthInput();
+    return;
+  }
+
   const auth = specsStore.effectiveAuth();
   if (_profile?.auth_required && auth.token) {
     typeSel.value = auth.in === 'query'                          ? 'api_key_query'
@@ -236,90 +292,9 @@ function renderBodySection() {
     : '{\n  \n}';
 }
 
-// ── Schema → example builder ──────────────────────────────────────────────────
-
-// Extracts the request-body schema from an operation, supporting both
-// Swagger 2 (a `parameters` entry with `in: 'body'`) and OpenAPI 3
-// (`requestBody.content[<media-type>].schema`, preferring a JSON media type).
-export function getRequestBodySchema(operation) {
-  const bodyParam = (operation.parameters ?? []).find(p => p.in === 'body');
-  if (bodyParam?.schema) return bodyParam.schema;
-
-  const content = operation.requestBody?.content;
-  if (content) {
-    const types   = Object.keys(content);
-    const jsonKey = types.find(t => t.includes('json')) ?? types[0];
-    return content[jsonKey]?.schema ?? null;
-  }
-  return null;
-}
-
-// The spec is dereferenced once at load time (SwaggerParser, circular:'ignore'),
-// so schemas arrive fully inlined. The `spec` arg is kept for call-site
-// compatibility but no longer used for resolution.
-export function buildExampleFromSchema(schema) {
-  if (!schema) return null;
-
-  // Any $ref still present is a circular one SwaggerParser left in place — stop
-  // here to avoid infinite recursion.
-  if (schema.$ref) return {};
-
-  // Inline example wins
-  if (schema.example !== undefined) return schema.example;
-
-  const type = schema.type;
-
-  if (type === 'object' || schema.properties) {
-    const obj = {};
-    const props = schema.properties ?? {};
-    for (const [key, propSchema] of Object.entries(props)) {
-      obj[key] = buildExampleFromSchema(propSchema);
-    }
-    return obj;
-  }
-
-  if (type === 'array') {
-    const item = schema.items ? buildExampleFromSchema(schema.items) : 'string';
-    return [item];
-  }
-
-  return primitiveExample(type, schema.format, schema.enum);
-}
-
-// Builds an example body for a given response status, reusing the same
-// status→schema lookup the Try It schema-validation panel uses (responseSchema).
-// `status` may be a code ('200', '404') or 'default'. Returns the example
-// object/array/scalar, or null when that status has no schema. Used by the
-// specs scaffolder to seed each endpoint's 200 / error response bodies.
-export function getResponseExample(operation, status, spec) {
-  const responses = operation?.responses;
-  if (!responses) return null;
-  const resDef = responses[status] ?? responses.default;
-  if (!resDef) return null;
-  const schema = responseSchema(resDef);
-  return schema ? buildExampleFromSchema(schema, spec) : null;
-}
-
-function primitiveExample(type, format, enumVals) {
-  if (enumVals?.length) return enumVals[0];
-
-  switch (type) {
-    case 'integer':
-    case 'number':   return format === 'float' || format === 'double' ? 0.0 : 0;
-    case 'boolean':  return false;
-    case 'string':
-      switch (format) {
-        case 'uuid':      return '3fa85f64-5717-4562-b3fc-2c963f66afa6';
-        case 'date':      return '2024-01-01';
-        case 'date-time': return '2024-01-01T00:00:00Z';
-        case 'email':     return 'user@example.com';
-        case 'uri':       return 'https://example.com';
-        case 'password':  return 'secret';
-        default:          return 'string';
-      }
-    default: return null;
-  }
-}
+// Schema → example builders (getRequestBodySchema / buildExampleFromSchema /
+// getResponseExample) and response-schema validation now live in
+// tryit/schema-validator.js — DOM-free and unit-tested.
 
 function renderDefaultHeaders() {
   const list    = document.getElementById('rb-headers-list');
@@ -386,8 +361,8 @@ function updateAutoAuthHeader() {
 
   if (type === 'none' || !value) return;
 
-  let headerKey = '';
-  let headerVal = '';
+  // Both are assigned on every branch below; the `else` returns early.
+  let headerKey, headerVal;
 
   if (type === 'bearer') {
     headerKey = 'Authorization';
@@ -424,7 +399,7 @@ function makeHeaderRow(key, value, auto = false, kind = 'default') {
     <input type="text" class="rb-header-val" value="${escHtml(value)}" ${auto ? 'readonly' : 'placeholder="Value"'} />
     ${auto
       ? `<span class="rb-auto-badge">${kind === 'auto-auth' ? 'auth' : 'default'}</span>`
-      : `<button class="rb-remove-btn" onclick="this.closest('.rb-header-row').remove()">✕</button>`
+      : `<button class="rb-remove-btn">✕</button>`
     }
   `;
   return row;
@@ -462,7 +437,7 @@ export async function sendRequest() {
 
     const rawText    = await res.text();
     let   prettyBody = rawText;
-    try { prettyBody = JSON.stringify(JSON.parse(rawText), null, 2); } catch {}
+    try { prettyBody = JSON.stringify(JSON.parse(rawText), null, 2); } catch { /* not JSON — keep raw text */ }
 
     showResponse({
       status:  res.status,
@@ -482,68 +457,40 @@ export async function sendRequest() {
 }
 
 // ── URL / headers / body builders ─────────────────────────────────────────────
+// These thin wrappers read the current input values from the DOM and delegate
+// the actual composition to the pure helpers in tryit/request-core.js.
 
 function buildUrl() {
-  const baseUrl = document.getElementById('rb-base-url').value.trim().replace(/\/$/, '');
+  const pathParams = {};
+  document.querySelectorAll('#rb-path-params [data-param]').forEach(el => { pathParams[el.dataset.param] = el.value; });
+  const queryParams = {};
+  document.querySelectorAll('#rb-query-params [data-query]').forEach(el => { queryParams[el.dataset.query] = el.value; });
 
-  // Replace path params
-  let path = _profile.path;
-  document.querySelectorAll('#rb-path-params [data-param]').forEach(el => {
-    path = path.replace(`{${el.dataset.param}}`, encodeURIComponent(el.value.trim() || `{${el.dataset.param}}`));
+  return buildRequestUrl(_profile.path, {
+    baseUrl:     document.getElementById('rb-base-url').value,
+    pathParams,
+    queryParams,
+    auth: {
+      type:  document.getElementById('rb-auth-type').value,
+      key:   document.getElementById('rb-auth-key').value,
+      value: document.getElementById('rb-auth-value').value,
+    },
   });
-
-  // Collect query params
-  const qp = new URLSearchParams();
-  document.querySelectorAll('#rb-query-params [data-query]').forEach(el => {
-    if (el.value.trim()) qp.set(el.dataset.query, el.value.trim());
-  });
-
-  // Auth as query param
-  const authType  = document.getElementById('rb-auth-type').value;
-  const authValue = document.getElementById('rb-auth-value').value.trim();
-  if (authType === 'api_key_query' && authValue) {
-    const keyName = document.getElementById('rb-auth-key').value.trim() || 'api_key';
-    qp.set(keyName, authValue);
-  }
-
-  const qs = qp.toString();
-  return baseUrl + path + (qs ? '?' + qs : '');
 }
 
 function buildHeaders() {
-  const headers = {};
-
-  // Read all header rows (default, auto-auth, and custom) in DOM order.
-  // Later rows win on duplicate keys, so user-added rows override defaults.
-  document.querySelectorAll('#rb-headers-list .rb-header-row').forEach(row => {
-    const key = row.querySelector('.rb-header-key').value.trim();
-    const val = row.querySelector('.rb-header-val').value.trim();
-    if (key) headers[key] = val;
+  const headerRows = [...document.querySelectorAll('#rb-headers-list .rb-header-row')].map(row => ({
+    key: row.querySelector('.rb-header-key').value.trim(),
+    val: row.querySelector('.rb-header-val').value.trim(),
+  }));
+  return buildRequestHeaders(headerRows, {
+    baseUrl:     document.getElementById('rb-base-url').value,
+    proxyOrigin: location.origin,
   });
-
-  // Browsers refuse to let fetch() set a `Cookie` header (it's a forbidden
-  // header name and is dropped before the request leaves the page). When the
-  // request is routed through our local dev-server proxy, send the cookie as
-  // X-Proxy-Cookie instead; devserver.py renames it back to Cookie before
-  // forwarding to the real API.
-  const baseUrl     = document.getElementById('rb-base-url').value.trim();
-  const proxyPrefix = `${location.origin}/proxy?url=`;
-  if (baseUrl.startsWith(proxyPrefix)) {
-    // Match the cookie header regardless of casing (Cookie / cookie / COOKIE).
-    const cookieKey = Object.keys(headers).find(k => k.toLowerCase() === 'cookie');
-    if (cookieKey) {
-      headers['X-Proxy-Cookie'] = headers[cookieKey];
-      delete headers[cookieKey];
-    }
-  }
-
-  // api_key_query auth is not a header — handled in buildUrl()
-  return headers;
 }
 
 function buildBody() {
-  if (!['POST','PUT','PATCH'].includes(_profile.method)) return undefined;
-  return document.getElementById('rb-body').value.trim() || undefined;
+  return buildRequestBody(_profile.method, document.getElementById('rb-body').value);
 }
 
 // ── Response display ──────────────────────────────────────────────────────────
@@ -597,7 +544,7 @@ function showTcComparison(tc, actualStatus, elapsed, passed) {
         Expected <strong>${expectedStatuses(tc.expected_status).join(' or ')}</strong> — Got <strong>${actualStatus}</strong>
       </span>
     </div>
-    <button class="rb-save-result-btn" onclick="window.__rbSaveResult(${actualStatus}, ${elapsed}, ${passed})">
+    <button class="rb-save-result-btn" data-actual-status="${actualStatus}" data-elapsed="${elapsed}" data-passed="${passed}">
       Save Result to TC-${tc.id.replace('TC-','')}
     </button>
   `;
@@ -702,162 +649,15 @@ export async function saveBaseline() {
 
 // ── Schema validation ─────────────────────────────────────────────────────────
 
+// Thin DOM renderer over the pure validateResponse() in tryit/schema-validator.js.
 function validateResponseSchema(status, body) {
   const el = document.getElementById('rb-res-schema');
   if (!el) return;
 
-  if (!_operation?.responses) {
-    el.innerHTML = schemaMsg('none', `No response definitions in spec.`);
-    return;
-  }
-
-  const resDef = _operation.responses[status] ?? _operation.responses['default'];
-  if (!resDef) {
-    el.innerHTML = schemaMsg('none', `No schema defined for status ${status}.`);
-    return;
-  }
-
-  const rawSchema = responseSchema(resDef);
-  if (!rawSchema) {
-    el.innerHTML = schemaMsg('none', `Response ${status} has no schema (status-only response).`);
-    return;
-  }
-
-  let parsed;
-  try { parsed = JSON.parse(body); } catch {
-    el.innerHTML = schemaMsg('none', `Response body is not JSON — cannot validate schema.`);
-    return;
-  }
-
-  // rawSchema is already dereferenced (load-time SwaggerParser pass); pass it
-  // straight to Ajv, which still resolves any remaining circular $ref via the
-  // spec's definitions/components.
-  const errors = [];
-  validateValue(parsed, rawSchema, _spec, 'response', errors);
-
-  if (errors.length === 0) {
-    el.innerHTML = schemaMsg('pass', `Schema valid — all fields match the spec for status ${status}.`);
-  } else {
-    el.innerHTML = schemaMsg('fail', `${errors.length} issue${errors.length > 1 ? 's' : ''} found for status ${status}:`)
-      + `<ul class="rb-schema-errors">${errors.map(e => `<li><code>${escHtml(e.path)}</code> — ${escHtml(e.msg)}</li>`).join('')}</ul>`;
-  }
-}
-
-// A response's schema sits directly on the response object in Swagger 2, but
-// under content[<media-type>].schema in OpenAPI 3 (prefer a JSON media type).
-function responseSchema(resDef) {
-  if (resDef.schema) return resDef.schema;
-  const content = resDef.content;
-  if (content) {
-    const types   = Object.keys(content);
-    const jsonKey = types.find(t => t.includes('json')) ?? types[0];
-    return content[jsonKey]?.schema ?? null;
-  }
-  return null;
-}
-
-// Validate `value` against an OpenAPI/Swagger `schema` using Ajv (JSON Schema
-// draft-07). The spec's reusable schemas are attached so internal $refs resolve,
-// and Ajv handles $ref cycles natively — so no hand-rolled recursion or
-// visited-set is needed. Ajv's errors are mapped back into the { path, msg }
-// shape the rest of validateResponseSchema() renders.
-function validateValue(value, schema, spec, path, errors) {
-  if (!schema) return;
-
-  // Carry the spec's shared schemas so #/definitions/* (Swagger 2) and
-  // #/components/schemas/* (OpenAPI 3) $refs resolve. ajvSchema() deep-clones
-  // and rewrites OpenAPI's `nullable: true`, so the original spec is untouched.
-  const root = ajvSchema({
-    ...schema,
-    ...(spec?.definitions ? { definitions: spec.definitions } : {}),
-    ...(spec?.components  ? { components:  spec.components  } : {}),
-  });
-
-  let validate;
-  try {
-    validate = newAjv().compile(root);
-  } catch (e) {
-    errors.push({ path, msg: `schema could not be compiled (${e.message})` });
-    return;
-  }
-
-  if (validate(value)) return;
-  for (const err of validate.errors ?? []) {
-    errors.push(ajvErrorToEntry(path, err, value));
-  }
-}
-
-// Ajv tuned to tolerate OpenAPI-flavoured JSON Schema:
-//   strict:false         — ignore OpenAPI-only keywords (example, xml, discriminator, readOnly…)
-//   allErrors:true       — collect every problem instead of stopping at the first
-//   allowUnionTypes:true — accept the type arrays produced by nullable handling
-// allOf / anyOf / oneOf / additionalProperties are core keywords Ajv enforces by
-// default; addFormats() registers the string/numeric format validators (date-time,
-// email, uri, uuid, int32/int64…) so `format` is checked too. A fresh instance per
-// call keeps validation stateless and avoids Ajv's "schema already exists" cache
-// errors should a spec carry $id/id keywords.
-function newAjv() {
-  const ajv = new Ajv({ strict: false, allErrors: true, allowUnionTypes: true });
-  addFormats(ajv);
-  return ajv;
-}
-
-// Deep-clone a schema while rewriting OpenAPI 3.0 `nullable: true` into the
-// JSON-Schema-native way of allowing null, so Ajv accepts null wherever the spec
-// permits it instead of flagging a type/enum error. Handles both the `type`
-// form ("string" -> ["string","null"]) and the `enum` form (append null).
-function ajvSchema(node) {
-  if (Array.isArray(node)) return node.map(ajvSchema);
-  if (node && typeof node === 'object') {
-    const out = {};
-    for (const [k, v] of Object.entries(node)) out[k] = ajvSchema(v);
-    if (out.nullable === true) {
-      if (Array.isArray(out.type)) {
-        if (!out.type.includes('null')) out.type = [...out.type, 'null'];
-      } else if (typeof out.type === 'string') {
-        out.type = [out.type, 'null'];
-      }
-      if (Array.isArray(out.enum) && !out.enum.includes(null)) {
-        out.enum = [...out.enum, null];
-      }
-    }
-    delete out.nullable;
-    return out;
-  }
-  return node;
-}
-
-// Map one Ajv error onto the { path, msg } shape the UI lists, rebuilding the
-// dotted/bracketed display path (response.tags[0].name) from Ajv's JSON pointer.
-function ajvErrorToEntry(rootPath, err, rootValue) {
-  let p = rootPath;
-  for (const seg of err.instancePath.split('/').slice(1).map(unescapePtr)) {
-    p += /^\d+$/.test(seg) ? `[${seg}]` : `.${seg}`;
-  }
-  if (err.keyword === 'required') {
-    return { path: `${p}.${err.params.missingProperty}`, msg: 'required field missing' };
-  }
-  if (err.keyword === 'type') {
-    const want = Array.isArray(err.params.type) ? err.params.type.join('|') : err.params.type;
-    return { path: p, msg: `expected ${want}, got ${describeType(valueAtPointer(rootValue, err.instancePath))}` };
-  }
-  return { path: p, msg: err.message ?? 'invalid' };
-}
-
-// Undo JSON Pointer escaping (~1 -> /, ~0 -> ~) for a single path segment.
-function unescapePtr(seg) { return seg.replace(/~1/g, '/').replace(/~0/g, '~'); }
-
-// Walk `obj` to the value Ajv flagged, given its JSON Pointer instancePath.
-function valueAtPointer(obj, pointer) {
-  return pointer.split('/').slice(1).reduce(
-    (o, seg) => (o == null ? o : o[unescapePtr(seg)]), obj);
-}
-
-function describeType(v) {
-  if (v === null) return 'null';
-  if (Array.isArray(v)) return 'array';
-  if (typeof v === 'number' && !Number.isInteger(v)) return 'float';
-  return typeof v;
+  const { kind, message, errors } = validateResponse(_operation, _spec, status, body);
+  el.innerHTML = schemaMsg(kind, message) + (errors.length
+    ? `<ul class="rb-schema-errors">${errors.map(e => `<li><code>${escHtml(e.path)}</code> — ${escHtml(e.msg)}</li>`).join('')}</ul>`
+    : '');
 }
 
 function schemaMsg(kind, text) {

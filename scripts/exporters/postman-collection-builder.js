@@ -1,8 +1,11 @@
-import { isCookieAuth } from './request-builder.js';
-import { getConfig } from './config-loader.js';
-import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectivePathParams, effectiveRequestBody, saveOrDownload } from './specs-store.js';
+import { isCookieAuth } from '../tryit/request-core.js';
+import { getConfig } from '../core/config-loader.js';
+import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectivePathParams, effectiveRequestBody, saveOrDownload } from '../specs-store.js';
 import { getTestBody, BODY_KIND } from './body-builder.js';
-import { expectedStatuses } from './template-matcher.js';
+import { expectedStatuses } from '../core/template-matcher.js';
+import { CATEGORY_ORDER, CATEGORY_LABEL } from '../core/case-order.js';
+import { is2xx, is4xx } from '../core/status-utils.js';
+import { normalizeAssertion, pathParamNames, methodHasBody, filenameSlug } from './export-shared.js';
 
 /**
  * Builds a Postman Collection v2.1 object from the current endpoint state
@@ -15,7 +18,7 @@ import { expectedStatuses } from './template-matcher.js';
  */
 export async function exportPostman(profile, operation, spec, testCases, swaggerId) {
   const method  = profile.method;
-  const hasBody = ['POST', 'PUT', 'PATCH'].includes(method);
+  const hasBody = methodHasBody(method);
   const baseUrl = effectiveBaseUrl(spec);
 
   // Valid-body example: the specs request body (user-edited) or the schema example.
@@ -36,9 +39,9 @@ export async function exportPostman(profile, operation, spec, testCases, swagger
     .filter(p => p.in === 'query')
     .map(p => ({ key: p.name, value: '', description: p.description ?? '', disabled: true }));
 
-  const pathParamNames = [...profile.path.matchAll(/\{([^}]+)\}/g)].map(m => m[1]);
+  const pathParams = pathParamNames(profile.path);
 
-  const folders = buildFolders(testCases, profile, method, hasBody, { validBody, literalBody }, queryParams, pathParamNames, exampleObj);
+  const folders = buildFolders(testCases, profile, method, hasBody, { validBody, literalBody }, queryParams, pathParams, exampleObj);
 
   // Assemble collection variables, de-duplicating by key. Only the (many) valid
   // body fields are exposed here; failing payloads are hardcoded in their requests.
@@ -50,7 +53,7 @@ export async function exportPostman(profile, operation, spec, testCases, swagger
   addVar({ key: 'baseUrl',       value: baseUrl,             type: 'string' });
   addVar({ key: 'token',         value: auth.token,          type: 'string', description: 'Valid bearer token' });
   addVar({ key: 'expired_token', value: auth.expiredToken,   type: 'string', description: 'An expired bearer token for auth tests' });
-  pathParamNames.forEach(n => addVar({ key: n, value: pathParamDefaults[n] || '', type: 'string' }));
+  pathParams.forEach(n => addVar({ key: n, value: pathParamDefaults[n] || '', type: 'string' }));
   validVars.forEach(addVar);
 
   const collection = {
@@ -98,26 +101,16 @@ function buildBodies(exampleObj) {
 
 // ── Folders ───────────────────────────────────────────────────────────────────
 
-// Fixed category priority used for ordering test cases everywhere (table + JSON
-// export + these Postman folders): happy_path → positive → negative → auth →
-// boundary → generated.
-export const CATEGORY_ORDER = ['happy_path', 'positive', 'negative', 'auth', 'boundary', 'generated'];
-const CATEGORY_LABEL = {
-  happy_path: 'Happy Path',
-  positive:   'Positive',
-  negative:   'Negative',
-  auth:       'Auth',
-  boundary:   'Boundary',
-  generated:  'Generated (from response)',
-};
+// Category order + labels are single-sourced in core/case-order.js so the table,
+// JSON export and both exporters stay in sync.
 
-function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, pathParamNames, exampleObj) {
+function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, pathParams, exampleObj) {
   return CATEGORY_ORDER
     .map(cat => {
       const items = testCases
         .filter(tc => tc.category === cat)
         .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))
-        .map(tc => buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamNames, exampleObj));
+        .map(tc => buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParams, exampleObj));
       if (!items.length) return null;
       return { name: CATEGORY_LABEL[cat], item: items };
     })
@@ -126,13 +119,13 @@ function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, 
 
 // ── Request item ──────────────────────────────────────────────────────────────
 
-function buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParamNames, exampleObj) {
+function buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParams, exampleObj) {
   // 405 cases send a disallowed method; all other cases use the endpoint's method.
   const reqMethod  = tc.disallowed_method ?? method;
-  const reqHasBody = tc.disallowed_method ? ['POST', 'PUT', 'PATCH'].includes(reqMethod) : hasBody;
+  const reqHasBody = tc.disallowed_method ? methodHasBody(reqMethod) : hasBody;
 
   const headers = buildHeaders(tc, profile, reqHasBody);
-  const url     = buildUrl(profile, queryParams, pathParamNames);
+  const url     = buildUrl(profile, queryParams, pathParams);
 
   const rawBody = selectRawBody(tc, bodies.validBody, exampleObj);
 
@@ -237,10 +230,8 @@ export function getTestScripts(tc) {
 function templateBlocks(tc, statuses) {
   const out = [];
   const primary = statuses[0];
-  const is2xx = primary >= 200 && primary < 300;
-  const is4xx = primary >= 400 && primary < 500;
 
-  if (is2xx) {
+  if (is2xx(primary)) {
     out.push([
       `pm.test('Response body is valid JSON', function () {`,
       `  pm.response.to.have.jsonBody();`,
@@ -255,7 +246,7 @@ function templateBlocks(tc, statuses) {
         `});`,
       ]);
     }
-  } else if (is4xx) {
+  } else if (is4xx(primary)) {
     out.push([
       `pm.test('Error response is valid JSON', function () {`,
       `  pm.response.to.have.jsonBody();`,
@@ -275,52 +266,43 @@ function templateBlocks(tc, statuses) {
 
 // Assertion block for a generated case's observed shape. Returns lines or null.
 function assertionBlock(a) {
+  const n = normalizeAssertion(a);
+  if (!n) return null;
   const J = '  var json = pm.response.json();';
 
-  if (a.kind === 'array-root') {
-    return [
-      `pm.test('Response is an array', function () {`,
-      J,
-      `  pm.expect(json).to.be.an('array');`,
-      `});`,
-    ];
-  }
-  if (a.kind === 'field' && isSimpleKey(a.path)) {
-    return [
-      `pm.test('Body has field "${a.path}" (${a.jsType})', function () {`,
-      J,
-      `  pm.expect(json).to.have.property('${a.path}');`,
-      ...(a.jsType && a.jsType !== 'null' ? [`  pm.expect(json['${a.path}']).to.be.a('${a.jsType}');`] : []),
-      `});`,
-    ];
-  }
-  if (a.kind === 'count' && isSimpleKey(a.path)) {
-    return [
-      `pm.test('Collection "${a.path}" is an array', function () {`,
-      J,
-      `  pm.expect(json['${a.path}']).to.be.an('array');`,
-      `});`,
-    ];
-  }
-  if (a.kind === 'item-field') {
-    const collKey = parseCollectionKey(a.collection);
-    if (collKey && isSimpleKey(a.path)) {
+  switch (n.kind) {
+    case 'array-root':
       return [
-        `pm.test('Items in "${collKey}" have field "${a.path}"', function () {`,
+        `pm.test('Response is an array', function () {`,
         J,
-        `  pm.expect(json['${collKey}'][0]).to.have.property('${a.path}');`,
+        `  pm.expect(json).to.be.an('array');`,
         `});`,
       ];
-    }
+    case 'field':
+      return [
+        `pm.test('Body has field "${n.path}" (${n.jsType})', function () {`,
+        J,
+        `  pm.expect(json).to.have.property('${n.path}');`,
+        ...(n.jsType && n.jsType !== 'null' ? [`  pm.expect(json['${n.path}']).to.be.a('${n.jsType}');`] : []),
+        `});`,
+      ];
+    case 'count':
+      return [
+        `pm.test('Collection "${n.path}" is an array', function () {`,
+        J,
+        `  pm.expect(json['${n.path}']).to.be.an('array');`,
+        `});`,
+      ];
+    case 'item-field':
+      return [
+        `pm.test('Items in "${n.collKey}" have field "${n.path}"', function () {`,
+        J,
+        `  pm.expect(json['${n.collKey}'][0]).to.have.property('${n.path}');`,
+        `});`,
+      ];
+    default:
+      return null;
   }
-  return null;
-}
-
-function isSimpleKey(k) { return /^[A-Za-z_][A-Za-z0-9_]*$/.test(k); }
-
-function parseCollectionKey(base) {
-  const m = /^([A-Za-z_][A-Za-z0-9_]*)\[0\]$/.exec(base || '');
-  return m ? m[1] : null;
 }
 
 function buildHeaders(tc, profile, hasBody) {
@@ -351,14 +333,14 @@ function resolveAuthHeader(tc, profile) {
   return null;
 }
 
-function buildUrl(profile, queryParams, pathParamNames) {
+function buildUrl(profile, queryParams, pathParams) {
   const rawPath = profile.path.replace(/\{([^}]+)\}/g, '{{$1}}');
   return {
     raw:  `{{baseUrl}}${rawPath}`,
     host: ['{{baseUrl}}'],
     path: rawPath.replace(/^\//, '').split('/'),
-    ...(queryParams.length    ? { query:    queryParams } : {}),
-    ...(pathParamNames.length ? { variable: pathParamNames.map(n => ({ key: n, value: `{{${n}}}` })) } : {}),
+    ...(queryParams.length ? { query:    queryParams } : {}),
+    ...(pathParams.length  ? { variable: pathParams.map(n => ({ key: n, value: `{{${n}}}` })) } : {}),
   };
 }
 
@@ -367,8 +349,7 @@ function buildUrl(profile, queryParams, pathParamNames) {
 // Writes the collection to output/{id}/postman/ via the dev-server save
 // endpoint, falling back to a browser download when it isn't running.
 function download(collection, method, path, swaggerId) {
-  const slug = path.replace(/^\//, '').replace(/\//g, '-').replace(/[{}]/g, '').replace(/-+/g, '-');
-  const filename = `postman-${method.toLowerCase()}-${slug}.json`;
+  const filename = `postman-${method.toLowerCase()}-${filenameSlug(path)}.json`;
   const content  = JSON.stringify(collection, null, 2);
   return saveOrDownload(`output/${swaggerId}/postman/${filename}`, filename, content, 'application/json');
 }

@@ -13,10 +13,11 @@
 //     endpoints: { "GET /path": { method, path, summary, authRequired, pathParams, responses: { "200", error }, baseline? } }
 //   }
 
-import { getBaseUrl, isCookieAuth, getResponseExample, getRequestBodySchema, buildExampleFromSchema } from './request-builder.js';
-import { getConfig } from './config-loader.js';
-import { getEndpointsByTag } from './swagger-loader.js';
-import { getOperation, profileEndpoint } from './template-matcher.js';
+import { getBaseUrl, isCookieAuth } from './tryit/request-core.js';
+import { getResponseExample, getRequestBodySchema, buildExampleFromSchema } from './tryit/schema-validator.js';
+import { getConfig } from './core/config-loader.js';
+import { getEndpointsByTag } from './core/swagger-loader.js';
+import { getOperation, profileEndpoint } from './core/template-matcher.js';
 
 const SAVE_ENDPOINT = '/save?path=';
 

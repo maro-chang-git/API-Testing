@@ -32,21 +32,46 @@ Pure ES modules with no build step. Dev tooling (Vite, ESLint) is available via 
 ```
 API Testing/
 ├── index.html                          # Entry point — Test Cases + Try It tabs
-├── package.json                        # npm dev dependencies (Vite, ESLint)
+├── package.json                        # npm dev dependencies (Vite, ESLint, Vitest)
 ├── vite.config.js                      # Vite dev server — proxies /proxy & /save to Python server
-├── css/
-│   └── styles.css                      # All styles
+├── eslint.config.js                    # ESLint flat config (targets scripts/)
+├── css/                                # Styles, split by area, linked in cascade order from index.html
+│   ├── base.css                        #   reset + body + header
+│   ├── toolbar.css                     #   toolbar, tab switcher, filter bar, export buttons
+│   ├── table.css                       #   summary cards, table, badges, expandable detail row
+│   ├── tryit.css                       #   Try It request panes (endpoint, params, auth, headers, body, send)
+│   └── response.css                    #   response + schema-validation panes
 ├── scripts/
 │   ├── app.js                          # Orchestrator: cascade, filter, sort, render, results store, export wiring
-│   ├── swagger-loader.js               # Fetch manifest + specs; extract tags & endpoints (Swagger 2 + OpenAPI 3)
-│   ├── template-matcher.js             # Profile an endpoint, match templates, derive stable TC ids
-│   ├── request-builder.js              # Try It tab — base URL, params, auth, headers, body, send, schema validation
-│   ├── config-loader.js                # Load data/config.json merged over built-in defaults
-│   ├── body-builder.js                 # Shared layer that builds valid / negative request bodies for exporters
-│   ├── postman-collection-builder.js   # Postman v2.1 export + pm.test scripts + category ordering
-│   ├── karate-feature-builder.js       # Karate .feature export
 │   ├── specs-store.js                  # Per-swagger specs file: scaffold, effective resolvers, save
-│   └── response-test-generator.js      # Exploratory: derive cases from a live / pasted response body
+│   ├── core/
+│   │   ├── swagger-loader.js           #   Fetch manifest + specs; extract tags & endpoints (Swagger 2 + OpenAPI 3)
+│   │   ├── template-matcher.js         #   Profile an endpoint, match templates, derive stable TC ids
+│   │   ├── config-loader.js            #   Load data/config.json merged over built-in defaults
+│   │   ├── case-order.js               #   CATEGORY_ORDER + categoryRank + compareTestCases (single source)
+│   │   ├── case-expander.js            #   Expand the TPL-NEG-009 405 case into one per disallowed method
+│   │   └── status-utils.js             #   statusClass + is2xx / is4xx range checks (shared)
+│   ├── tryit/
+│   │   ├── request-ui.js               #   Try It tab UI — base URL, params, auth, headers, body, send, sticky session
+│   │   ├── request-core.js             #   DOM-free URL / header / body construction
+│   │   └── schema-validator.js         #   AJV response-schema validation + example builders
+│   ├── exporters/
+│   │   ├── body-builder.js             #   Shared layer that builds valid / negative request bodies for exporters
+│   │   ├── postman-collection-builder.js  # Postman v2.1 export + pm.test scripts
+│   │   ├── karate-feature-builder.js   #   Karate .feature export
+│   │   └── export-shared.js            #   De-duped body selection, assertion model, key parsing, filename slug
+│   ├── generate/
+│   │   ├── response-test-generator.js  #   Exploratory: derive cases from a live / pasted response body
+│   │   └── case-folder.js              #   Fold generated assertions into the matching template case
+│   ├── state/
+│   │   └── results-store.js            #   localStorage load/persist + endpointKey
+│   ├── ui/
+│   │   ├── dom.js                      #   id helpers + esc() (single source)
+│   │   ├── tabs.js                     #   activateTab / bindTabs
+│   │   ├── filter-sort.js              #   pure filterAndSort(cases, filters, sort) → rows
+│   │   └── table-render.js             #   renderTable / renderTcDetail / renderSummary / toggleDetail
+│   └── vendor/                         # Pre-bundled AJV + SwaggerParser
+├── tests/                              # Vitest unit tests (npm test) for the pure-logic modules
 ├── data/
 │   ├── templates.json                  # General-purpose test case template library
 │   └── config.json                     # Auth tokens, default headers, response-time threshold, path params
@@ -68,26 +93,29 @@ API Testing/
 ## Architecture & data flow
 
 ```
-        swagger-loader ─┐
-                        ▼
-  user selections → template-matcher.profileEndpoint() → matchTemplates() → matched cases
-                        │                                                        │
-                        ▼                                                        ▼
-                  request-builder (Try It)                              app.js render / filter / sort
-                        │  send → response                                       │
-                        ▼                                                        ▼
-              response-test-generator                          body-builder ──┬─► postman-collection-builder
-              (assertions folded into                                         └─► karate-feature-builder
-               the matching case)
+        core/swagger-loader ─┐
+                             ▼
+  user selections → core/template-matcher.profileEndpoint() → matchTemplates() → matched cases
+                             │                                                        │
+                             ▼                                                        ▼
+                  tryit/request-ui (Try It)                            app.js → ui/ render / filter / sort
+                             │  send → response                                       │
+                             ▼                                                        ▼
+              generate/response-test-generator                 exporters/body-builder ─┬─► exporters/postman-collection-builder
+              (assertions folded via                                                   └─► exporters/karate-feature-builder
+               generate/case-folder into the matching case)
 ```
 
+Modules are grouped into folders by concern — `core/` (loaders, matcher, shared ordering/status helpers), `tryit/` (the Try It request UI + DOM-free core + schema validation), `exporters/` (the shared body-builder layer + Postman/Karate/JSON output), `generate/` (exploratory case derivation), `state/` (results store), and `ui/` (DOM helpers, tabs, table render, pure filter/sort). `app.js` and `specs-store.js` sit at the `scripts/` root.
+
 - **`app.js`** is the single orchestrator. It owns the swagger → tag → endpoint cascade, the filter/sort state, the rendered table, and the per-endpoint results store (persisted in `localStorage` under `apitest.results.v1`).
-- **`body-builder.js`** is a format-agnostic middle layer: it turns a test case + a schema-derived example into a `{ kind, data }` body descriptor (valid / empty / object / malformed). Both the Postman and Karate exporters consume the same descriptor, so negative-body behaviour stays consistent across formats.
-- **`config-loader.js`** loads `data/config.json` once at startup and deep-merges it over built-in defaults; every other module reads it synchronously via `getConfig()`.
+- **`exporters/body-builder.js`** is a format-agnostic middle layer: it turns a test case + a schema-derived example into a `{ kind, data }` body descriptor (valid / empty / object / malformed). Both the Postman and Karate exporters consume the same descriptor, so negative-body behaviour stays consistent across formats.
+- **`core/config-loader.js`** loads `data/config.json` once at startup and deep-merges it over built-in defaults; every other module reads it synchronously via `getConfig()`.
+- **`core/case-order.js`** is the single source for the category ordering (`happy_path → positive → negative → auth → boundary → generated`) and `compareTestCases`.
 
 ## Template matching logic
 
-When an endpoint is selected, `template-matcher.js` builds a profile from the swagger operation:
+When an endpoint is selected, `core/template-matcher.js` builds a profile from the swagger operation:
 
 | Profile property | How it is derived |
 |---|---|
@@ -101,7 +129,7 @@ When an endpoint is selected, `template-matcher.js` builds a profile from the sw
 
 Each template declares an `applies_to` rule. A template is matched only when **all** its conditions satisfy the endpoint profile.
 
-Each matched case gets a **stable id** derived from its template id (`TPL-HP-003` → `TC-HP-003`). Because saved results are keyed by `endpointKey + TC id`, this id must not depend on filter/sort order — see the note in `template-matcher.js`.
+Each matched case gets a **stable id** derived from its template id (`TPL-HP-003` → `TC-HP-003`). Because saved results are keyed by `endpointKey + TC id`, this id must not depend on filter/sort order — see the note in `core/template-matcher.js`.
 
 ## Template library (`data/templates.json`)
 
@@ -295,7 +323,7 @@ The **first** code in the array is the "primary" status, used to decide success-
 
 ## Configuration (`data/config.json`)
 
-Optional. Any key omitted falls back to the built-in default in `config-loader.js`.
+Optional. Any key omitted falls back to the built-in default in `core/config-loader.js`.
 
 ```json
 {
@@ -311,6 +339,17 @@ Optional. Any key omitted falls back to the built-in default in `config-loader.j
 ```
 
 These values seed the Try It defaults and the Postman/Karate exports (e.g. the `{{token}}` collection variable, the `responseTime <` assertion threshold).
+
+## Testing & linting
+
+The pure-logic modules are plain ES modules with no DOM, so they unit-test cleanly in Node. Tests live in `tests/` and run with [Vitest](https://vitest.dev/):
+
+```cmd
+npm test        # run the unit suite once (vitest run)
+npm run lint    # ESLint over scripts/
+```
+
+The suite characterizes the behaviour that must stay stable across refactors: template matching + stable TC ids, the body-builder `{ kind, data }` descriptors, the pure `filterAndSort`, status classification, the 405 case expander, the generated-case folder, request-core URL/header/body construction, schema validation, and the de-duped exporter helpers.
 
 ## Running the viewer
 

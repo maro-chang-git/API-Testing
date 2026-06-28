@@ -1,0 +1,74 @@
+/* ── Response panel ── */
+.rb-res-title { margin-top: 8px; }
+.rb-res-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 0.82rem;
+}
+.rb-res-label  { font-weight: 600; color: #64748b; min-width: 52px; font-size: 0.75rem; }
+.rb-res-url    { word-break: break-all; color: #374151; }
+.rb-elapsed    { font-size: 0.75rem; color: #64748b; margin-left: 8px; }
+
+.rb-res-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.rb-res-tab {
+  background: none;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+}
+.rb-res-tab.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
+
+.rb-res-pane {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 0.78rem;
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 360px;
+  overflow-y: auto;
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* ── Schema validation panel ── */
+.rb-schema-pane {
+  background: #0f172a;
+  border-radius: 8px;
+  padding: 16px;
+  max-height: 360px;
+  overflow-y: auto;
+  font-size: 0.82rem;
+}
+.rb-schema-summary {
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  font-family: sans-serif;
+}
+.rb-schema-pass { background: #052e16; color: #86efac; }
+.rb-schema-fail { background: #450a0a; color: #fca5a5; }
+.rb-schema-info { background: #1e293b; color: #94a3b8; }
+.rb-schema-errors {
+  margin: 0;
+  padding: 0 0 0 18px;
+  color: #fca5a5;
+  font-family: monospace;
+  font-size: 0.78rem;
+  line-height: 1.8;
+}
+.rb-schema-errors code {
+  color: #f9a8d4;
+  background: #1e1b33;
+  padding: 1px 5px;
+  border-radius: 3px;
+}

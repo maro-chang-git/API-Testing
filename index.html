@@ -4,7 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>API Test Cases</title>
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/toolbar.css" />
+  <link rel="stylesheet" href="css/table.css" />
+  <link rel="stylesheet" href="css/tryit.css" />
+  <link rel="stylesheet" href="css/response.css" />
 </head>
 <body>
 
@@ -150,11 +154,7 @@
         <div class="rb-base-url-row">
           <label class="rb-base-url-label">Base URL</label>
           <input type="text" id="rb-base-url" class="rb-base-url-input" placeholder="https://…" spellcheck="false" />
-          <button class="rb-proxy-btn" onclick="
-            const inp = document.getElementById('rb-base-url');
-            const proxy = location.origin + '/proxy?url=';
-            if (!inp.value.startsWith(proxy)) inp.value = proxy + inp.value;
-          " title="Route through the local dev-server proxy to bypass CORS">🔗 Proxy</button>
+          <button class="rb-proxy-btn" id="rb-proxy-btn" title="Route through the local dev-server proxy to bypass CORS">🔗 Proxy</button>
         </div>
         <div class="rb-cors-hint">
           ⚠ CORS: if requests are blocked, change Base URL to a local instance or click
@@ -181,7 +181,7 @@
         <div class="rb-section-title">Authentication</div>
         <div class="rb-param-row">
           <label class="rb-param-name">Type</label>
-          <select id="rb-auth-type" onchange="window.__rbToggleAuth()">
+          <select id="rb-auth-type">
             <option value="none">None</option>
             <option value="bearer">Bearer Token</option>
             <option value="api_key_header">API Key — Header</option>
@@ -203,7 +203,7 @@
       <div class="rb-section">
         <div class="rb-section-title">
           Headers
-          <button class="rb-add-btn" onclick="window.__rbAddHeader()">+ Add</button>
+          <button class="rb-add-btn" id="rb-add-header-btn">+ Add</button>
         </div>
         <div id="rb-headers-list"></div>
       </div>
@@ -216,7 +216,7 @@
       <!-- Active TC banner -->
       <div id="rb-active-tc" class="rb-active-tc" style="display:none;"></div>
 
-      <button id="rb-send-btn" onclick="window.__rbSend()">Send Request</button>
+      <button id="rb-send-btn">Send Request</button>
 
       <!-- TC comparison (appears after send when a TC is active) -->
       <div id="rb-tc-comparison" style="display:none;"></div>
@@ -225,7 +225,7 @@
       <div id="rb-response" style="display:none;">
         <div class="rb-section-title rb-res-title">
           Response
-          <button id="rb-baseline-btn" class="rb-baseline-btn" onclick="window.__rbSaveBaseline()"
+          <button id="rb-baseline-btn" class="rb-baseline-btn"
                   title="Record this response as the endpoint baseline in the specs file">📌 Save as baseline</button>
         </div>
 
@@ -270,7 +270,7 @@
         <div class="rb-gen-row">
           <label class="rb-param-name">Status</label>
           <input type="number" id="rb-sample-status" class="rb-gen-status" value="200" />
-          <button class="rb-add-btn" id="rb-gen-btn" onclick="window.__rbGenerateFromSample()">Generate</button>
+          <button class="rb-add-btn" id="rb-gen-btn">Generate</button>
         </div>
         <div id="rb-gen-manual-notice" class="rb-gen-notice" style="display:none;"></div>
       </div>

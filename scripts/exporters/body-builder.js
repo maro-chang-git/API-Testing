@@ -10,7 +10,7 @@
  *   OBJECT    – send the plain object in `data` (type / range / huge-payload tests)
  *   MALFORMED – send the raw string in `data` as-is (not valid JSON)
  */
-import { expectedStatuses } from './template-matcher.js';
+import { expectedStatuses } from '../core/template-matcher.js';
 
 export const BODY_KIND = Object.freeze({
   VALID:    'valid',
