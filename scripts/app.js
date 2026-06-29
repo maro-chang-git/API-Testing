@@ -178,7 +178,7 @@ function runTc(tcId) {
 // ── Exploratory generation from a live response ───────────────────────────────
 
 // Auto-generation from a successful live response.
-function handleTryItResponse({ status, body }) {
+function handleTryItResponse({ status, body, stream = null }) {
   if (!currentProfile) return;
 
   // Mirror the response into the manual "Generate" box so it can be tweaked / re-run.
@@ -188,6 +188,16 @@ function handleTryItResponse({ status, body }) {
   if (sampleStatus) sampleStatus.value = status;
 
   const notice = document.getElementById('rb-gen-notice');
+
+  // Streaming (SSE) responses carry no JSON body to derive assertions from —
+  // skip data-driven generation and say so plainly instead of "not JSON".
+  if (stream) {
+    if (notice) {
+      notice.style.display = '';
+      notice.innerHTML = `<span class="rb-gen-icon">🌊</span> Streaming response (text/event-stream) — ${stream.count} events received. Data-driven test generation is skipped for streams.`;
+    }
+    return;
+  }
 
   // A 401/403 proves this endpoint enforces auth even though the spec marked it
   // optional/anonymous — flip it, add the auth test cases, and stop (an error

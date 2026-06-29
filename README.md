@@ -8,7 +8,8 @@ Pure ES modules with no build step. Dev tooling (Vite, ESLint) is available via 
 
 - **Auto-generated test cases** — select an endpoint and the tool matches applicable templates from `data/templates.json` (happy-path, positive, negative, auth, boundary)
 - **Swagger 2.0 *and* OpenAPI 3.x** — tags, endpoints, request bodies, security, and response schemas are read from either spec version
-- **Try It tab** — configure auth, headers, query/path params, and request body, then send real requests from the browser
+- **Try It tab** — configure auth, headers, query/path params, and request body, then send real requests from the browser. The auth style is pre-selected from the spec's security scheme, and the operation's `in: header` parameters (e.g. `anthropic-version`) are auto-added as editable, pre-filled header rows
+- **Streaming (SSE) responses** — a `text/event-stream` response is parsed automatically: the reconstructed message text is shown above the raw event frames (both Anthropic and OpenAI delta shapes are supported)
 - **Response schema validation** — the response body is checked against the spec's response schema (resolving `$ref`s in both `#/definitions/` and `#/components/schemas/`)
 - **Exploratory testing** — click ▶ on a row to run a case; the tool pre-fills auth, shows PASS/FAIL after the response, and lets you save the result back to the case
 - **Generated cases** — a successful (or pasted) JSON response is analysed to derive data-driven assertions (observed fields, types, collection sizes); these are **folded into the matching case as extra test scripts** (e.g. a 200 body's field/shape checks land on the happy-path GET case), so they run and export inside that case rather than as separate rows
@@ -54,7 +55,8 @@ API Testing/
 │   ├── tryit/
 │   │   ├── request-ui.js               #   Try It tab UI — base URL, params, auth, headers, body, send, sticky session
 │   │   ├── request-core.js             #   DOM-free URL / header / body construction
-│   │   └── schema-validator.js         #   AJV response-schema validation + example builders
+│   │   ├── schema-validator.js         #   AJV response-schema validation + example builders
+│   │   └── sse-parser.js               #   DOM-free text/event-stream parser (reconstructs streamed chat text)
 │   ├── exporters/
 │   │   ├── body-builder.js             #   Shared layer that builds valid / negative request bodies for exporters
 │   │   ├── postman-collection-builder.js  # Postman v2.1 export + pm.test scripts
@@ -79,12 +81,15 @@ API Testing/
 │   ├── index.json                      # Manifest — list of available specs
 │   ├── testek.json                     # Testek Product Management API (Swagger 2.0)
 │   ├── openapi3.json                   # Minimal OpenAPI 3 example
-│   └── openfigi.json                   # OpenFIGI API (OpenAPI 3, real-world)
+│   ├── openfigi.json                   # OpenFIGI API (OpenAPI 3, real-world)
+│   └── feature-demo.json               # Anthropic API demo (multipart file upload + SSE stream chat)
 ├── output/                             # Generated per swagger (id from index.json)
 │   └── {id}/
 │       ├── specs.json                  # Swagger + endpoint specs + recorded baselines
 │       ├── postman/postman-{method}-{slug}.json
-│       └── karate/karate-{method}-{slug}.feature
+│       └── karate/
+│           ├── karate-{method}-{slug}.feature
+│           └── karate-config.js        # shared base URL / credentials (written once, preserved on re-export)
 └── README.md
 ```
 
@@ -177,17 +182,17 @@ For the matched **405** case (TPL-NEG-009), `app.js` expands it into one case pe
 The **Try It** tab sends real HTTP requests against the selected endpoint.
 
 - **Base URL** — pre-filled from the spec (`schemes`/`host`/`basePath` for Swagger 2, `servers[].url` with `{variable}` defaults for OpenAPI 3); edit it to point to a local instance or a CORS proxy
-- **Authentication** — choose Bearer Token, API Key (header or query), Cookie, or Basic Auth; the matching header (or query param) updates automatically
-- **Headers** — default headers (Accept, Content-Type) are added automatically; add custom headers with **+ Add** (later rows override earlier ones)
+- **Authentication** — choose Bearer Token, API Key (header or query), Cookie, or Basic Auth; the matching header (or query param) updates automatically. When the endpoint requires auth, the style is pre-selected from the spec's security scheme — an `apiKey`-in-header scheme fills its real header name (e.g. `x-api-key`) and sends the token raw (no `Bearer` prefix)
+- **Headers** — default headers (Accept, Content-Type) are added automatically, and the operation's `in: header` parameters (e.g. `anthropic-version`, `anthropic-beta`) are pre-filled from their schema default/example as editable rows; add more with **+ Add** (later rows override earlier ones)
 - **Request Body** — pre-filled with an example generated from the request schema
-- **Send Request** — fires a `fetch()` and shows status, response headers, formatted body, and a **Schema** tab with validation results
+- **Send Request** — fires a `fetch()` and shows status, response headers, formatted body, and a **Schema** tab with validation results. A `text/event-stream` (SSE) response is detected automatically: the reconstructed message text is shown above the raw frames, and schema validation / data-driven generation are skipped (a stream carries no JSON body)
 
 ### CORS
 
 Browser `fetch()` is subject to CORS. If the API server doesn't send CORS headers, the request is blocked. Options:
 
 1. Change the Base URL to a local instance of the API (e.g. `http://localhost:8080`)
-2. Click **🔗 Proxy** to prefix the Base URL with the local dev-server proxy (`/proxy?url=`). The server forwards the request server-side, so CORS never applies. Because browsers won't let `fetch()` set a `Cookie` header, the Try It tab sends it as `X-Proxy-Cookie` and the proxy renames it back to `Cookie` before forwarding. This requires serving the page with `devserver.py` (below).
+2. Click **🔗 Proxy** to prefix the Base URL with the local dev-server proxy (`/proxy?url=`). The server forwards the request server-side, so CORS never applies. Because browsers won't let `fetch()` set a `Cookie` header, the Try It tab sends it as `X-Proxy-Cookie` and the proxy renames it back to `Cookie` before forwarding. The proxy also drops the browser's `Origin`/`Referer`, so APIs that reject direct browser calls (e.g. Anthropic, which otherwise demands `anthropic-dangerous-direct-browser-access`) accept the forwarded request. This requires serving the page with `devserver.py` (below).
 3. Install a browser extension that disables CORS checks (dev use only)
 
 If the live call is blocked, you can still paste a sample JSON response into **Generate Test Cases** to derive generated cases offline.
@@ -216,7 +221,7 @@ headers, request body, and path-param defaults from the [per-swagger specs file]
 If the page isn't being served by `devserver.py` (so `/save` is unavailable), each export falls back to a
 normal browser download.
 
-All three reuse the same category ordering (`happy_path → positive → negative → auth → boundary → generated`) and the same body-builder layer, so the cases line up across formats.
+All three reuse the same category ordering (`happy_path → positive → negative → auth → boundary → generated`) and the same body-builder layer, so the cases line up across formats. The Postman and Karate auth headers match the spec's security scheme — a Bearer `Authorization`, a raw apiKey header (e.g. `x-api-key`, no `Bearer` prefix), or a `Cookie`. The Karate export also writes a shared **`karate-config.js`** (base URL + credentials) beside the feature files on the first export; it is preserved on re-export so hand-edited values survive.
 
 ## Per-swagger specs file
 
@@ -233,7 +238,7 @@ defaults and the Postman/Karate exports. A value present in the file **overrides
 
   "swagger": {                                   // ── Swagger specs ──
     "baseUrl": "https://api.example.com/v1",
-    "auth": { "type": "OAuth2", "in": "header",  // scheme name + where the credential goes
+    "auth": { "type": "OAuth2", "kind": "oauth2", "name": null, "in": "header",  // scheme name + kind (apiKey/http/oauth2) + apiKey header name + where the credential goes
               "token": "", "expiredToken": "", "invalidTokenValue": "invalid_token_tampered_xyz" },
     "headers": { "accept": "application/json", "contentType": "application/json" }
   },
@@ -349,7 +354,7 @@ npm test        # run the unit suite once (vitest run)
 npm run lint    # ESLint over scripts/
 ```
 
-The suite characterizes the behaviour that must stay stable across refactors: template matching + stable TC ids, the body-builder `{ kind, data }` descriptors, the pure `filterAndSort`, status classification, the 405 case expander, the generated-case folder, request-core URL/header/body construction, schema validation, and the de-duped exporter helpers.
+The suite characterizes the behaviour that must stay stable across refactors: template matching + stable TC ids, the body-builder `{ kind, data }` descriptors, the pure `filterAndSort`, status classification, the 405 case expander, the generated-case folder, request-core URL/header/body construction, schema validation, the SSE stream parser, and the de-duped exporter helpers.
 
 ## Running the viewer
 

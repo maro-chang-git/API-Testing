@@ -27,8 +27,13 @@ SAVE_PREFIX = '/save?'
 OUTPUT_ROOT = os.path.realpath(os.path.join(os.getcwd(), 'output'))
 
 # Request headers the proxy must not forward: hop-by-hop / connection-specific
-# ones, plus those it sets itself (Host, Content-Length).
-SKIP_REQUEST_HEADERS = {'host', 'connection', 'content-length', 'accept-encoding'}
+# ones, plus those it sets itself (Host, Content-Length). `origin`/`referer` are
+# dropped too so the target sees a server-side client, not a browser — some APIs
+# (e.g. Anthropic) otherwise reject the call as a direct browser request unless a
+# special opt-in header is set. The proxy already removes CORS from the equation,
+# so the browser's Origin serves no purpose downstream.
+SKIP_REQUEST_HEADERS = {'host', 'connection', 'content-length', 'accept-encoding',
+                        'origin', 'referer'}
 
 # Response headers we regenerate ourselves or that don't survive proxying.
 # Content-Encoding is kept so a gzipped body still decodes in the browser.

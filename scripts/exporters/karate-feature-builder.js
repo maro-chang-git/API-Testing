@@ -21,6 +21,16 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
   const hasBody    = methodHasBody(method);
   const cookieAuth = isCookieAuth(profile.auth_type);
 
+  // Auth style → header name + a wrapper turning a karate-config var name into the
+  // header value expression. Cookie, raw apiKey header (e.g. x-api-key, no Bearer
+  // prefix), or Bearer Authorization. `expiredVar` names the config var to use.
+  const auth           = effectiveAuth();
+  const apiKeyHeader   = auth.kind === 'apiKey' && auth.in === 'header';
+  const authHeaderName = cookieAuth ? 'Cookie' : apiKeyHeader ? (auth.name || 'X-API-Key') : 'Authorization';
+  const authWrap       = cookieAuth ? (v => `'session=' + ${v}`) : apiKeyHeader ? (v => v) : (v => `'Bearer ' + ${v}`);
+  const validVar       = cookieAuth ? 'sessionToken'   : 'token';
+  const expiredVar     = cookieAuth ? 'expiredSession' : 'expiredToken';
+
   // Valid-body example: the specs request body (user-edited) or the schema example.
   const exampleObj    = hasBody ? effectiveRequestBody(method, profile.path, operation, spec) : null;
   const validBodyExpr = inlineValidBody(exampleObj);
@@ -33,7 +43,7 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
   lines.push('');
   lines.push(`  # Endpoint: ${method} ${profile.path}`);
   lines.push(`  # Auth: ${profile.auth_required
-    ? `${cookieAuth ? 'session cookie' : 'Bearer token'} (configured in karate-config.js)`
+    ? `${cookieAuth ? 'session cookie' : apiKeyHeader ? `${authHeaderName} header` : 'Bearer token'} (configured in karate-config.js)`
     : 'none'}`);
   if (operation.externalDocs?.url) lines.push(`  # Doc: ${operation.externalDocs.url}`);
   lines.push('');
@@ -47,7 +57,7 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
   // Default headers applied to every request. The auth Scenario Outline overrides
   // this map per-row (see buildAuthOutline); all others inherit it.
   const defaultAuthClause = profile.auth_required
-    ? (cookieAuth ? `Cookie: 'session=' + sessionToken` : `Authorization: 'Bearer ' + token`)
+    ? `${mapKey(authHeaderName)}: ${authWrap(validVar)}`
     : null;
   lines.push(`    * configure headers = ${headersMapExpr({ contentType: hasBody, auth: defaultAuthClause })}`);
 
@@ -81,7 +91,7 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
     // The auth cases differ only by credential + expected status, so they fold into
     // a single data-driven Scenario Outline instead of one near-identical copy each.
     if (cat === 'auth') {
-      buildAuthOutline(cases, profile, method, hasBody, cookieAuth, lines);
+      buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, authWrap, expiredVar }, lines);
       lines.push('');
       return;
     }
@@ -157,13 +167,12 @@ function buildMethodNotAllowedOutline(cases, profile, lines) {
 // the expected status. Each Examples row supplies the Authorization/Cookie value via
 // a Karate embedded expression (`#(...)`), with `#(null)` driving the missing-header
 // case; the configure-headers step adds the credential only when it isn't null.
-function buildAuthOutline(cases, profile, method, hasBody, cookieAuth, lines) {
-  const headerName = cookieAuth ? 'Cookie' : 'Authorization';
-  const base       = hasBody ? `Accept: accept, 'Content-Type': contentType` : `Accept: accept`;
+function buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, authWrap, expiredVar }, lines) {
+  const base = hasBody ? `Accept: accept, 'Content-Type': contentType` : `Accept: accept`;
 
   lines.push(`  @auth`);
   lines.push(`  Scenario Outline: <id> — <desc>`);
-  lines.push(`    * configure headers = (authValue == null ? ({ ${base} }) : ({ ${base}, ${headerName}: authValue }))`);
+  lines.push(`    * configure headers = (authValue == null ? ({ ${base} }) : ({ ${base}, ${mapKey(authHeaderName)}: authValue }))`);
   lines.push(`    Given path ${buildKaratePath(profile.path)}`);
   if (hasBody) lines.push(`    And request validBody`);
   lines.push(`    When method ${method.toLowerCase()}`);
@@ -175,7 +184,7 @@ function buildAuthOutline(cases, profile, method, hasBody, cookieAuth, lines) {
   lines.push(`    Examples:`);
   const rows = cases.map(tc => [
     tc.id,
-    authValueCell(tc.auth_status, cookieAuth),
+    authValueCell(tc.auth_status, authWrap, expiredVar),
     String(expectedStatuses(tc.expected_status)[0]),
     String(tc.purpose).replace(/\|/g, '/'),
   ]);
@@ -185,10 +194,9 @@ function buildAuthOutline(cases, profile, method, hasBody, cookieAuth, lines) {
 // The Examples cell for an auth row's credential, as a Karate embedded expression
 // resolving against the karate-config.js vars. Missing / insufficient-permission
 // cases send no credential (`#(null)`).
-function authValueCell(authStatus, cookieAuth) {
-  const wrap = cookieAuth ? v => `'session=' + ${v}` : v => `'Bearer ' + ${v}`;
-  if (authStatus === 'invalid') return `#(${wrap('invalidToken')})`;
-  if (authStatus === 'expired') return `#(${wrap(cookieAuth ? 'expiredSession' : 'expiredToken')})`;
+function authValueCell(authStatus, authWrap, expiredVar) {
+  if (authStatus === 'invalid') return `#(${authWrap('invalidToken')})`;
+  if (authStatus === 'expired') return `#(${authWrap(expiredVar)})`;
   return `#(null)`;
 }
 
@@ -218,6 +226,12 @@ function headersMapExpr({ contentType, auth }) {
   if (contentType) parts.push(`'Content-Type': contentType`);
   if (auth) parts.push(auth);
   return `({ ${parts.join(', ')} })`;
+}
+
+// Quote a header name as a JS map key when it isn't a bare identifier (e.g.
+// x-api-key → 'x-api-key'); Authorization / Cookie stay unquoted.
+function mapKey(name) {
+  return /^[A-Za-z_$][\w$]*$/.test(name) ? name : `'${name}'`;
 }
 
 // ── Assertions ─────────────────────────────────────────────────────────────────
@@ -405,7 +419,11 @@ async function ensureKarateConfigFile(swaggerId, content) {
   const relPath = `output/${swaggerId}/karate/karate-config.js`;
   try {
     const res = await fetch(relPath, { cache: 'no-store' });
-    if (res.ok) return;   // already present — keep the user's edits
+    // A dev server may answer a missing file with an SPA index.html (200 text/html);
+    // only treat the config as present when the response is actually a JS file, so
+    // we don't silently skip writing it. Real edits are preserved either way.
+    const ct = res.headers.get('content-type') || '';
+    if (res.ok && !/html/i.test(ct)) return;   // already present — keep the user's edits
   } catch {
     // dev server down — fall through to save (which itself falls back to download)
   }

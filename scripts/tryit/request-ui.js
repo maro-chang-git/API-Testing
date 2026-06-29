@@ -3,6 +3,7 @@ import { expectedStatuses } from '../core/template-matcher.js';
 import * as specsStore from '../specs-store.js';
 import { validateResponse } from './schema-validator.js';
 import { isCookieAuth, buildRequestUrl, buildRequestHeaders, buildRequestBody } from './request-core.js';
+import { isEventStream, parseEventStream } from './sse-parser.js';
 
 let _profile   = null;   // endpoint profile from template-matcher
 let _operation = null;   // raw swagger operation object
@@ -89,6 +90,7 @@ export function initRequestBuilder(profile, operation, spec, swaggerId) {
   renderBodySection();
   resetHeadersList();
   renderDefaultHeaders();
+  renderHeaderParams();
   // Auth last: renderAuthSection() pre-fills the token and inserts the read-only
   // Authorization "auto-auth" header row. It must run AFTER resetHeadersList()
   // (which clears the list) so a pre-filled token's header survives into the
@@ -298,6 +300,28 @@ function renderBodySection() {
 // getResponseExample) and response-schema validation now live in
 // tryit/schema-validator.js — DOM-free and unit-tested.
 
+// Renders the operation's `in: header` parameters as editable, pre-filled header
+// rows (seeded from each param's schema default/example), so spec-required
+// headers like `anthropic-version` are actually sent. They're tagged
+// data-header-param (editable + removable, unlike the readonly Accept/Content-Type
+// defaults) and re-rendered on every endpoint switch.
+function renderHeaderParams() {
+  const list = document.getElementById('rb-headers-list');
+  list.querySelectorAll('[data-header-param]').forEach(el => el.remove());
+
+  const params = (_operation?.parameters ?? []).filter(p => p.in === 'header');
+  if (!params.length) return;
+
+  // Place them after the default headers (the first non-default row, or the end).
+  const anchor = [...list.children].find(el => !el.dataset.defaultHeader) ?? null;
+  for (const p of params) {
+    const seed = p.schema?.default ?? p.schema?.example ?? '';
+    const row = makeHeaderRow(p.name, String(seed), false);
+    row.dataset.headerParam = '1';
+    list.insertBefore(row, anchor);
+  }
+}
+
 function renderDefaultHeaders() {
   const list    = document.getElementById('rb-headers-list');
   const hasBody = ['POST','PUT','PATCH'].includes(_profile.method);
@@ -437,9 +461,14 @@ export async function sendRequest() {
     });
     const elapsed = Math.round(performance.now() - start);
 
-    const rawText    = await res.text();
-    let   prettyBody = rawText;
-    try { prettyBody = JSON.stringify(JSON.parse(rawText), null, 2); } catch { /* not JSON — keep raw text */ }
+    const rawText     = await res.text();
+    const contentType = res.headers.get('content-type') || '';
+    const stream      = isEventStream(contentType, rawText) ? parseEventStream(rawText) : null;
+
+    let prettyBody = rawText;
+    if (!stream) {
+      try { prettyBody = JSON.stringify(JSON.parse(rawText), null, 2); } catch { /* not JSON — keep raw text */ }
+    }
 
     showResponse({
       status:  res.status,
@@ -448,6 +477,7 @@ export async function sendRequest() {
       body:    prettyBody,
       elapsed,
       url,
+      stream,
     });
   } catch (err) {
     const isCors = err.message === 'Failed to fetch' || err.message?.includes('NetworkError');
@@ -497,7 +527,7 @@ function buildBody() {
 
 // ── Response display ──────────────────────────────────────────────────────────
 
-function showResponse({ status, statusText, headers, body, elapsed, url }) {
+function showResponse({ status, statusText, headers, body, elapsed, url, stream = null }) {
   const panel = document.getElementById('rb-response');
   panel.style.display = '';
 
@@ -516,10 +546,27 @@ function showResponse({ status, statusText, headers, body, elapsed, url }) {
     headers.map(([k,v]) => `${k}: ${v}`).join('\n');
 
   const bodyEl = document.getElementById('rb-res-body');
-  bodyEl.textContent = body;
-  bodyEl.className   = 'rb-res-pane' + (isJson(body) ? ' json' : '');
+  if (stream) {
+    // Show the reconstructed message first (what the user cares about), then the
+    // raw frames for inspection.
+    const head = stream.text
+      ? `▼ Reconstructed text (${stream.count} events)\n${stream.text}\n\n▼ Raw stream\n`
+      : `▼ Raw stream (${stream.count} events)\n`;
+    bodyEl.textContent = head + body;
+    bodyEl.className   = 'rb-res-pane';
+  } else {
+    bodyEl.textContent = body;
+    bodyEl.className   = 'rb-res-pane' + (isJson(body) ? ' json' : '');
+  }
 
-  validateResponseSchema(status, body);
+  // SSE bodies aren't JSON — schema validation doesn't apply; show an info note.
+  if (stream) {
+    const schemaEl = document.getElementById('rb-res-schema');
+    if (schemaEl) schemaEl.innerHTML =
+      schemaMsg('info', `Streaming response (text/event-stream) — ${stream.count} events; JSON-schema validation not applicable.`);
+  } else {
+    validateResponseSchema(status, body);
+  }
 
   // If a test case is active, show comparison + save button. A case may accept
   // several statuses (e.g. 200 or 204) — it passes if the actual is any of them.
@@ -531,7 +578,7 @@ function showResponse({ status, statusText, headers, body, elapsed, url }) {
   }
 
   // Let the app derive data-driven test cases from this live response.
-  _onResponse?.({ status, body });
+  _onResponse?.({ status, body, stream });
 }
 
 function showTcComparison(tc, actualStatus, elapsed, passed) {

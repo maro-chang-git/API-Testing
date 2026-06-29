@@ -51,8 +51,8 @@ export async function exportPostman(profile, operation, spec, testCases, swagger
   const auth = effectiveAuth();
   const pathParamDefaults = effectivePathParams(method, profile.path);
   addVar({ key: 'baseUrl',       value: baseUrl,             type: 'string' });
-  addVar({ key: 'token',         value: auth.token,          type: 'string', description: 'Valid bearer token' });
-  addVar({ key: 'expired_token', value: auth.expiredToken,   type: 'string', description: 'An expired bearer token for auth tests' });
+  addVar({ key: 'token',         value: auth.token,          type: 'string', description: 'Valid auth token (Bearer / apiKey / cookie value)' });
+  addVar({ key: 'expired_token', value: auth.expiredToken,   type: 'string', description: 'An expired token for auth tests' });
   pathParams.forEach(n => addVar({ key: n, value: pathParamDefaults[n] || '', type: 'string' }));
   validVars.forEach(addVar);
 
@@ -316,20 +316,22 @@ function buildHeaders(tc, profile, hasBody) {
 }
 
 function resolveAuthHeader(tc, profile) {
-  const cookieAuth = isCookieAuth(profile.auth_type);
-  const invalid = effectiveAuth().invalidTokenValue;
+  const auth         = effectiveAuth();
+  const cookieAuth   = isCookieAuth(profile.auth_type);
+  const apiKeyHeader = auth.kind === 'apiKey' && auth.in === 'header';
+  const invalid      = auth.invalidTokenValue;
+
+  // Header key + value-wrapper for the active auth style: a cookie, a raw apiKey
+  // header (e.g. x-api-key — no Bearer prefix), or a Bearer Authorization header.
+  const key  = cookieAuth ? 'Cookie' : apiKeyHeader ? (auth.name || 'X-API-Key') : 'Authorization';
+  const wrap = cookieAuth ? v => `session=${v}` : apiKeyHeader ? v => `${v}` : v => `Bearer ${v}`;
+
   if (tc.category === 'auth') {
-    if (tc.auth_status === 'invalid')  return cookieAuth
-      ? { key: 'Cookie',        value: `session=${invalid}` }
-      : { key: 'Authorization', value: `Bearer ${invalid}` };
-    if (tc.auth_status === 'expired')  return cookieAuth
-      ? { key: 'Cookie',        value: 'session={{expired_token}}' }
-      : { key: 'Authorization', value: 'Bearer {{expired_token}}' };
+    if (tc.auth_status === 'invalid')  return { key, value: wrap(invalid) };
+    if (tc.auth_status === 'expired')  return { key, value: wrap('{{expired_token}}') };
     return null; // missing → no header
   }
-  if (profile.auth_required) return cookieAuth
-    ? { key: 'Cookie',        value: 'session={{token}}' }
-    : { key: 'Authorization', value: 'Bearer {{token}}' };
+  if (profile.auth_required) return { key, value: wrap('{{token}}') };
   return null;
 }
 
