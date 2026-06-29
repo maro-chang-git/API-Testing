@@ -1,8 +1,8 @@
 {
-  "version": "2.1",
-  "description": "General-purpose test case templates matched against a selected swagger endpoint at runtime.",
+  "version": "2.2",
+  "description": "General-purpose test case templates matched against a selected swagger endpoint at runtime. expected_status is an array of acceptable codes (first = primary) so a generic case passes against the range of conventions real APIs use for the same scenario.",
   "categories": ["happy_path", "positive", "negative", "auth", "boundary"],
-  "tags": ["valid", "invalid", "missing", "expired", "not_found", "malformed", "duplicate"],
+  "tags": ["valid", "invalid", "missing", "expired", "not_found", "malformed", "duplicate", "method_not_allowed"],
   "templates": [
     {
       "id": "TPL-HP-001",
@@ -31,8 +31,8 @@
       "applies_to": { "methods": ["POST"] },
       "auth_status": "valid",
       "purpose": "Successfully create a new resource with all required fields",
-      "expected_status": 201,
-      "notes": "Verify the response body contains the created resource with a generated ID"
+      "expected_status": [201, 200],
+      "notes": "Create commonly returns 201 (created) or 200 (ok); verify the response reflects the created resource"
     },
     {
       "id": "TPL-HP-004",
@@ -41,8 +41,8 @@
       "applies_to": { "methods": ["PUT"] },
       "auth_status": "valid",
       "purpose": "Successfully replace an existing resource with valid data",
-      "expected_status": 200,
-      "notes": "Confirm updated values are reflected in a subsequent GET"
+      "expected_status": [200, 204, 201],
+      "notes": "PUT returns 200 (updated), 204 (no content), or 201 (created via upsert); confirm updated values in a subsequent GET"
     },
     {
       "id": "TPL-HP-005",
@@ -51,8 +51,8 @@
       "applies_to": { "methods": ["PATCH"] },
       "auth_status": "valid",
       "purpose": "Successfully apply a partial update to an existing resource",
-      "expected_status": 200,
-      "notes": "Only changed fields should differ; unchanged fields must remain intact"
+      "expected_status": [200, 204],
+      "notes": "PATCH returns 200 (with body) or 204 (no content); changed fields differ, unchanged fields remain intact"
     },
     {
       "id": "TPL-HP-006",
@@ -61,8 +61,8 @@
       "applies_to": { "methods": ["DELETE"] },
       "auth_status": "valid",
       "purpose": "Successfully delete an existing resource by valid ID",
-      "expected_status": [200, 204],
-      "notes": "APIs return 200 (with body) or 204 (no content); follow up with GET to confirm the resource is gone (expect 404)"
+      "expected_status": [200, 204, 202],
+      "notes": "APIs return 200 (with body), 204 (no content), or 202 (accepted/async); follow up with GET to confirm the resource is gone (expect 404)"
     },
     {
       "id": "TPL-POS-001",
@@ -111,7 +111,7 @@
       "applies_to": { "methods": ["POST"], "has_body": true },
       "auth_status": "valid",
       "purpose": "Successfully create a resource with all optional fields populated",
-      "expected_status": 201,
+      "expected_status": [201, 200],
       "notes": "Verify all optional fields are persisted and returned in the response"
     },
     {
@@ -121,7 +121,7 @@
       "applies_to": { "methods": ["POST"], "has_body": true },
       "auth_status": "valid",
       "purpose": "Successfully create a resource with only required fields (omitting all optional ones)",
-      "expected_status": 201,
+      "expected_status": [201, 200],
       "notes": "Verify optional fields default to null or their defined default values"
     },
     {
@@ -131,7 +131,7 @@
       "applies_to": { "methods": ["PUT","PATCH"], "has_body": true },
       "auth_status": "valid",
       "purpose": "Update a single field while leaving all other fields unchanged",
-      "expected_status": 200,
+      "expected_status": [200, 204],
       "notes": "Confirm only the targeted field changes; others remain as-is"
     },
     {
@@ -141,7 +141,7 @@
       "applies_to": { "methods": ["PUT","PATCH"], "has_body": true },
       "auth_status": "valid",
       "purpose": "Update multiple fields in a single request",
-      "expected_status": 200,
+      "expected_status": [200, 204],
       "notes": "Verify all updated fields are reflected; unrelated fields are not affected"
     },
     {
@@ -191,8 +191,8 @@
       "applies_to": { "methods": ["POST","PUT","PATCH"] },
       "auth_status": "valid",
       "purpose": "Reject request with malformed JSON body",
-      "expected_status": 400,
-      "notes": "Send Content-Type: application/json with invalid JSON syntax"
+      "expected_status": [400, 422],
+      "notes": "Send Content-Type: application/json with invalid JSON syntax — expect 400 (or 422)"
     },
     {
       "id": "TPL-NEG-006",
@@ -211,8 +211,8 @@
       "applies_to": { "methods": ["GET","PUT","PATCH","DELETE"], "has_path_params": true },
       "auth_status": "valid",
       "purpose": "Reject the request when the path param ID has an invalid format",
-      "expected_status": [400, 404],
-      "notes": "Use a non-numeric or special-character ID, e.g. 'abc' or '@#$' — APIs return 400 (bad format) or 404 (no such route/resource)"
+      "expected_status": [400, 404, 422],
+      "notes": "Use a non-numeric or special-character ID, e.g. 'abc' or '@#$' — APIs return 400 (bad format), 404 (no such route/resource), or 422"
     },
     {
       "id": "TPL-NEG-008",
@@ -221,8 +221,8 @@
       "applies_to": { "methods": ["POST"] },
       "auth_status": "valid",
       "purpose": "Reject creation of a duplicate resource that violates a unique constraint",
-      "expected_status": 409,
-      "notes": "POST the same payload twice — second request should return 409 Conflict"
+      "expected_status": [409, 400, 422],
+      "notes": "POST the same payload twice — second request should be rejected: 409 Conflict (or 400 / 422). APIs with no uniqueness constraint will instead succeed (2xx)."
     },
     {
       "id": "TPL-NEG-009",
@@ -231,8 +231,8 @@
       "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"] },
       "auth_status": "valid",
       "purpose": "Return 405 when an HTTP method is not allowed on the endpoint",
-      "expected_status": 405,
-      "notes": "Send a method the endpoint does not support, e.g. DELETE on a read-only resource or PATCH where only GET/POST are allowed"
+      "expected_status": [405, 404],
+      "notes": "Send a method the endpoint does not support — expect 405 (some frameworks return 404 for an undefined method route)"
     },
     {
       "id": "TPL-AUTH-001",
@@ -241,8 +241,8 @@
       "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
       "auth_status": "missing",
       "purpose": "Reject request when Authorization header is absent",
-      "expected_status": 401,
-      "notes": "Send request with no Authorization header at all"
+      "expected_status": [401, 403],
+      "notes": "Send request with no Authorization header at all — expect 401 (some APIs return 403)"
     },
     {
       "id": "TPL-AUTH-002",
@@ -251,8 +251,8 @@
       "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
       "auth_status": "invalid",
       "purpose": "Reject request when the token is malformed or tampered",
-      "expected_status": 401,
-      "notes": "Authorization: Bearer invalid_token_xyz"
+      "expected_status": [401, 403],
+      "notes": "Authorization: Bearer invalid_token_xyz — expect 401 (some APIs return 403)"
     },
     {
       "id": "TPL-AUTH-003",
@@ -261,8 +261,8 @@
       "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
       "auth_status": "expired",
       "purpose": "Reject request when the token has expired",
-      "expected_status": 401,
-      "notes": "Use a real token past its expiry timestamp"
+      "expected_status": [401, 403],
+      "notes": "Use a real token past its expiry timestamp — expect 401 (some APIs return 403)"
     },
     {
       "id": "TPL-AUTH-004",
@@ -271,8 +271,8 @@
       "applies_to": { "methods": ["GET","POST","PUT","PATCH","DELETE"], "auth_required": true },
       "auth_status": "valid",
       "purpose": "Reject request from a user with a valid token but insufficient permissions",
-      "expected_status": 403,
-      "notes": "Use a token for a low-privilege role that should not access this endpoint"
+      "expected_status": [403, 401],
+      "notes": "Use a token for a low-privilege role that should not access this endpoint — expect 403 (some APIs collapse authz failures into 401)"
     },
     {
       "id": "TPL-AUTH-005",
@@ -281,8 +281,8 @@
       "applies_to": { "methods": ["GET","PUT","PATCH","DELETE"], "has_path_params": true, "auth_required": true },
       "auth_status": "valid",
       "purpose": "Reject access to a resource owned by another user",
-      "expected_status": 403,
-      "notes": "Use a valid token for User A but request a resource belonging to User B"
+      "expected_status": [403, 404],
+      "notes": "Use a valid token for User A but request a resource belonging to User B — expect 403 (some APIs return 404 to avoid leaking existence)"
     },
     {
       "id": "TPL-BND-001",
@@ -321,8 +321,8 @@
       "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
       "auth_status": "valid",
       "purpose": "Accept request when string fields are exactly at the maximum allowed length",
-      "expected_status": 201,
-      "notes": "Send a string of exactly maxLength characters — should succeed"
+      "expected_status": [200, 201, 204],
+      "notes": "Send a string of exactly maxLength characters — should succeed (2xx)"
     },
     {
       "id": "TPL-BND-005",
@@ -331,8 +331,8 @@
       "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true },
       "auth_status": "valid",
       "purpose": "Accept request when numeric fields are exactly at the minimum allowed value",
-      "expected_status": 201,
-      "notes": "e.g. price = 0 (if 0 is the defined minimum) — should succeed"
+      "expected_status": [200, 201, 204],
+      "notes": "e.g. price = 0 (if 0 is the defined minimum) — should succeed (2xx)"
     },
     {
       "id": "TPL-BND-006",
@@ -341,8 +341,8 @@
       "applies_to": { "methods": ["POST"] },
       "auth_status": "valid",
       "purpose": "Handle extremely large request payload without crashing",
-      "expected_status": [400, 413],
-      "notes": "Send a body with hundreds of extra unknown fields — expect 400 or 413 (Payload Too Large), not 500"
+      "expected_status": [400, 413, 422],
+      "notes": "Send a body with hundreds of extra unknown fields — expect 400, 413 (Payload Too Large), or 422, not 500"
     }
   ]
 }
