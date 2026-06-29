@@ -126,6 +126,8 @@ function scaffoldAuth(spec, cfg) {
   const def = name ? schemes[name] : null;
   return {
     type: name || 'none',
+    kind: def?.type ?? null,   // OpenAPI scheme kind: apiKey | http | oauth2 | …
+    name: def?.name ?? null,   // header/query name for apiKey schemes (e.g. x-api-key)
     in: authLocation(def, name),
     token: cfg.auth.token,
     expiredToken: cfg.auth.expiredToken,
@@ -157,6 +159,8 @@ export function effectiveAuth() {
   const a = _model?.swagger?.auth;
   return {
     type: a?.type ?? 'none',
+    kind: a?.kind ?? null,
+    name: a?.name ?? null,
     in: a?.in ?? 'header',
     token: a?.token ?? cfg.auth.token,
     expiredToken: a?.expiredToken ?? cfg.auth.expiredToken,

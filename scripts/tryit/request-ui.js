@@ -266,11 +266,13 @@ function renderAuthSection() {
 
   const auth = specsStore.effectiveAuth();
   if (_profile?.auth_required && auth.token) {
-    typeSel.value = auth.in === 'query'                          ? 'api_key_query'
+    typeSel.value = auth.in === 'query'                              ? 'api_key_query'
                   : (auth.in === 'cookie' || isCookieAuth(auth.type)) ? 'cookie'
-                  :                                                  'bearer';
+                  : (auth.kind === 'apiKey' && auth.in === 'header')  ? 'api_key_header'
+                  :                                                     'bearer';
     valEl.value = typeSel.value === 'cookie' ? `session=${auth.token}` : auth.token;
-    keyEl.value = '';
+    // For a header apiKey scheme, seed the header name from the spec (e.g. x-api-key).
+    keyEl.value = typeSel.value === 'api_key_header' ? (auth.name || 'X-API-Key') : '';
   } else {
     typeSel.value = 'none';
     valEl.value   = '';
