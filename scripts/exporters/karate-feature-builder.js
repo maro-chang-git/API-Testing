@@ -183,7 +183,9 @@ function buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, aut
   lines.push(`    Given path ${buildKaratePath(profile.path)}`);
   if (hasBody) lines.push(`    And request validBody`);
   lines.push(`    When method ${method.toLowerCase()}`);
-  lines.push(`    Then status <status>`);
+  // Match responseStatus against the row's allowed set (e.g. [403, 401]) so the
+  // auth outline honours multi-status templates like the regular scenarios do.
+  lines.push(`    Then match [<status>] contains responseStatus`);
   lines.push(`    * assert responseTime < ${getConfig().responseTimeThresholdMs}`);
   lines.push(`    * match response == '#object'`);
   lines.push(`    * assert response.message != null || response.error != null || response.detail != null`);
@@ -192,7 +194,7 @@ function buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, aut
   const rows = cases.map(tc => [
     tc.id,
     authValueCell(tc.auth_status, authWrap, expiredVar),
-    String(expectedStatuses(tc.expected_status)[0]),
+    expectedStatuses(tc.expected_status).join(', '),
     String(tc.purpose).replace(/\|/g, '/'),
   ]);
   renderExamplesTable(['id', 'authValue', 'status', 'desc'], rows).forEach(l => lines.push(l));
