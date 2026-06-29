@@ -132,6 +132,7 @@ When an endpoint is selected, `core/template-matcher.js` builds a profile from t
 | `has_body` | Operation has an `in: body` parameter (Swagger 2) or a `requestBody` (OpenAPI 3) |
 | `auth_required` | The operation **or the spec root** declares a non-empty `security` requirement. A `{}` entry (anonymous allowed) or an operation-level `security: []` (auth disabled) means **not** required. |
 | `auth_type` | Name of the first security scheme (e.g. `OAuth2`, `ApiKeyAuth`, `cookieAuth`) |
+| `response_is_stream` | True when a 2xx response declares `text/event-stream` content — drives stream-aware export assertions |
 
 Each template declares an `applies_to` rule. A template is matched only when **all** its conditions satisfy the endpoint profile.
 
@@ -239,7 +240,9 @@ npm run karate -- output/{id}/karate/karate-{method}-{endpoint}.feature
 
 The runner points `karate.config.dir` at the feature's folder so the sibling `karate-config.js` is picked up, and writes an HTML report under that folder's `target/`.
 
-Note that the bundled template library is general-purpose: against a specific real API some cases will report mismatches (e.g. a `POST` template expects `201` while the API returns `200`, or a streaming `text/event-stream` body isn't valid JSON for body-shape assertions). Tune `expected_status` in the spec / templates for the API under test.
+When an endpoint's success response is declared as `text/event-stream`, the generated assertions become **stream-aware** — instead of parsing a JSON body, Postman checks the `Content-Type` and that the body contains SSE `data:` frames, and Karate asserts `responseType == 'string'` + `response contains 'data:'`.
+
+Note that the bundled template library is general-purpose: against a specific real API some cases will still report mismatches it can't model generically (e.g. a duplicate-rejection case expects `409` while an API with no uniqueness constraint returns `2xx`). Tune `expected_status` in the spec / templates, or `responseTimeThresholdMs` in `data/config.json`, for the API under test.
 
 ## Per-swagger specs file
 

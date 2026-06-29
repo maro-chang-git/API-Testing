@@ -255,11 +255,18 @@ function buildKarateAssertions(tc, method, lines) {
     const line = karateAssertLine(tc.assertion);
     if (line) lines.push(`    ${line}`);
   } else if (is2xx(primary)) {
-    // A folded array-root assertion will assert `response == '#array'`; skip the
-    // generic object match so the scenario doesn't contradict itself.
-    if (!folded.some(a => a.kind === 'array-root')) lines.push(`    * match response == '#object'`);
-    if (method === 'POST' && statuses.includes(201)) {
-      lines.push(`    * match response.id == '#notnull'`);
+    if (tc.response_is_stream) {
+      // text/event-stream responses arrive as a raw string, not a JSON object —
+      // assert the stream shape instead of matching an object.
+      lines.push(`    * match responseType == 'string'`);
+      lines.push(`    * match response contains 'data:'`);
+    } else {
+      // A folded array-root assertion will assert `response == '#array'`; skip the
+      // generic object match so the scenario doesn't contradict itself.
+      if (!folded.some(a => a.kind === 'array-root')) lines.push(`    * match response == '#object'`);
+      if (method === 'POST' && statuses.includes(201)) {
+        lines.push(`    * match response.id == '#notnull'`);
+      }
     }
   } else if (is4xx(primary)) {
     lines.push(`    * match response == '#object'`);

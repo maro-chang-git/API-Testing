@@ -43,7 +43,18 @@ export function profileEndpoint(path, method, operation, spec) {
     has_query_params: hasQueryParams,
     has_body: hasBody,
     endpoint_type: endpointType,
+    response_is_stream: responseIsEventStream(operation),
   };
+}
+
+// True when the operation declares a Server-Sent-Events (text/event-stream)
+// success (2xx) response. Drives stream-aware assertion generation in the
+// exporters and is carried onto each matched case.
+function responseIsEventStream(operation) {
+  const responses = operation.responses || {};
+  return Object.entries(responses).some(([code, resp]) =>
+    /^2\d\d$/.test(code) &&
+    resp?.content && Object.keys(resp.content).some(ct => /event-stream/i.test(ct)));
 }
 
 /**
@@ -83,6 +94,7 @@ export function matchTemplates(profile, templates) {
     tag: tpl.tag,
     purpose: tpl.purpose,
     expected_status: tpl.expected_status,
+    response_is_stream: profile.response_is_stream,
     notes: tpl.notes,
   }));
 }

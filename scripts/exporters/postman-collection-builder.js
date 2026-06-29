@@ -238,19 +238,29 @@ function templateBlocks(tc, statuses) {
   const primary = statuses[0];
 
   if (is2xx(primary)) {
-    out.push([
-      `pm.test('Response body is valid JSON', function () {`,
-      `  pm.response.to.have.jsonBody();`,
-      `});`,
-    ]);
-    if (tc.method === 'POST' && statuses.includes(201)) {
+    if (tc.response_is_stream) {
+      // text/event-stream responses aren't JSON — assert the stream shape instead.
       out.push([
-        `pm.test('Created resource is returned with an id', function () {`,
-        `  var json = pm.response.json();`,
-        `  pm.expect(json).to.be.an('object');`,
-        `  pm.expect(json).to.have.property('id');`,
+        `pm.test('Streaming (text/event-stream) response', function () {`,
+        `  pm.expect(pm.response.headers.get('Content-Type') || '').to.include('text/event-stream');`,
+        `  pm.expect(pm.response.text()).to.include('data:');`,
         `});`,
       ]);
+    } else {
+      out.push([
+        `pm.test('Response body is valid JSON', function () {`,
+        `  pm.response.to.have.jsonBody();`,
+        `});`,
+      ]);
+      if (tc.method === 'POST' && statuses.includes(201)) {
+        out.push([
+          `pm.test('Created resource is returned with an id', function () {`,
+          `  var json = pm.response.json();`,
+          `  pm.expect(json).to.be.an('object');`,
+          `  pm.expect(json).to.have.property('id');`,
+          `});`,
+        ]);
+      }
     }
   } else if (is4xx(primary)) {
     out.push([
