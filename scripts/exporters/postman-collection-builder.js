@@ -39,9 +39,15 @@ export async function exportPostman(profile, operation, spec, testCases, swagger
     .filter(p => p.in === 'query')
     .map(p => ({ key: p.name, value: '', description: p.description ?? '', disabled: true }));
 
+  // Spec `in: header` params (e.g. anthropic-version) — sent on every request,
+  // seeded from each param's schema default/example.
+  const headerParams = (operation.parameters ?? [])
+    .filter(p => p.in === 'header')
+    .map(p => ({ key: p.name, value: String(p.schema?.default ?? p.schema?.example ?? '') }));
+
   const pathParams = pathParamNames(profile.path);
 
-  const folders = buildFolders(testCases, profile, method, hasBody, { validBody, literalBody }, queryParams, pathParams, exampleObj);
+  const folders = buildFolders(testCases, profile, method, hasBody, { validBody, literalBody }, queryParams, headerParams, pathParams, exampleObj);
 
   // Assemble collection variables, de-duplicating by key. Only the (many) valid
   // body fields are exposed here; failing payloads are hardcoded in their requests.
@@ -104,13 +110,13 @@ function buildBodies(exampleObj) {
 // Category order + labels are single-sourced in core/case-order.js so the table,
 // JSON export and both exporters stay in sync.
 
-function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, pathParams, exampleObj) {
+function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, headerParams, pathParams, exampleObj) {
   return CATEGORY_ORDER
     .map(cat => {
       const items = testCases
         .filter(tc => tc.category === cat)
         .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))
-        .map(tc => buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParams, exampleObj));
+        .map(tc => buildItem(tc, profile, method, hasBody, bodies, queryParams, headerParams, pathParams, exampleObj));
       if (!items.length) return null;
       return { name: CATEGORY_LABEL[cat], item: items };
     })
@@ -119,12 +125,12 @@ function buildFolders(testCases, profile, method, hasBody, bodies, queryParams, 
 
 // ── Request item ──────────────────────────────────────────────────────────────
 
-function buildItem(tc, profile, method, hasBody, bodies, queryParams, pathParams, exampleObj) {
+function buildItem(tc, profile, method, hasBody, bodies, queryParams, headerParams, pathParams, exampleObj) {
   // 405 cases send a disallowed method; all other cases use the endpoint's method.
   const reqMethod  = tc.disallowed_method ?? method;
   const reqHasBody = tc.disallowed_method ? methodHasBody(reqMethod) : hasBody;
 
-  const headers = buildHeaders(tc, profile, reqHasBody);
+  const headers = buildHeaders(tc, profile, reqHasBody, headerParams);
   const url     = buildUrl(profile, queryParams, pathParams);
 
   const rawBody = selectRawBody(tc, bodies.validBody, exampleObj);
@@ -305,12 +311,13 @@ function assertionBlock(a) {
   }
 }
 
-function buildHeaders(tc, profile, hasBody) {
+function buildHeaders(tc, profile, hasBody, headerParams = []) {
   const headers = effectiveHeaders();
   const authHeader = resolveAuthHeader(tc, profile);
   return [
     { key: 'Accept', value: headers.accept },
     ...(hasBody ? [{ key: 'Content-Type', value: headers.contentType }] : []),
+    ...headerParams,
     ...(authHeader ? [authHeader] : []),
   ];
 }

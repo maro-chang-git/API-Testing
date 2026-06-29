@@ -73,6 +73,7 @@ API Testing/
 │   │   ├── filter-sort.js              #   pure filterAndSort(cases, filters, sort) → rows
 │   │   └── table-render.js             #   renderTable / renderTcDetail / renderSummary / toggleDetail
 │   └── vendor/                         # Pre-bundled AJV + SwaggerParser
+├── tools/                              # Local Karate runner — setup-karate.ps1 / run-karate.ps1 (JRE + jar downloaded here, git-ignored)
 ├── tests/                              # Vitest unit tests (npm test) for the pure-logic modules
 ├── data/
 │   ├── templates.json                  # General-purpose test case template library
@@ -221,7 +222,24 @@ headers, request body, and path-param defaults from the [per-swagger specs file]
 If the page isn't being served by `devserver.py` (so `/save` is unavailable), each export falls back to a
 normal browser download.
 
-All three reuse the same category ordering (`happy_path → positive → negative → auth → boundary → generated`) and the same body-builder layer, so the cases line up across formats. The Postman and Karate auth headers match the spec's security scheme — a Bearer `Authorization`, a raw apiKey header (e.g. `x-api-key`, no `Bearer` prefix), or a `Cookie`. The Karate export also writes a shared **`karate-config.js`** (base URL + credentials) beside the feature files on the first export; it is preserved on re-export so hand-edited values survive.
+All three reuse the same category ordering (`happy_path → positive → negative → auth → boundary → generated`) and the same body-builder layer, so the cases line up across formats. The Postman and Karate auth headers match the spec's security scheme — a Bearer `Authorization`, a raw apiKey header (e.g. `x-api-key`, no `Bearer` prefix), or a `Cookie` — and both include the operation's `in: header` parameters (e.g. `anthropic-version`) on every request, so the exported artifacts are runnable as-is. The Karate export also writes a shared **`karate-config.js`** (base URL + credentials) beside the feature files on the first export; it is preserved on re-export so hand-edited values survive.
+
+You can execute a Postman export end-to-end with [newman](https://github.com/postmanlabs/newman) (a dev dependency):
+
+```cmd
+npm run newman -- output/{id}/postman/postman-{method}-{endpoint}.json
+```
+
+To execute a Karate `.feature`, install the project-local runner once — a portable Temurin 21 JRE + the Karate standalone jar, downloaded under `tools/` (git-ignored) — then run a feature:
+
+```cmd
+npm run karate:setup                                                  :: one-time, idempotent
+npm run karate -- output/{id}/karate/karate-{method}-{endpoint}.feature
+```
+
+The runner points `karate.config.dir` at the feature's folder so the sibling `karate-config.js` is picked up, and writes an HTML report under that folder's `target/`.
+
+Note that the bundled template library is general-purpose: against a specific real API some cases will report mismatches (e.g. a `POST` template expects `201` while the API returns `200`, or a streaming `text/event-stream` body isn't valid JSON for body-shape assertions). Tune `expected_status` in the spec / templates for the API under test.
 
 ## Per-swagger specs file
 

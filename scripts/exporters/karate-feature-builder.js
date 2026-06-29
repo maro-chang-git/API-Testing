@@ -31,6 +31,12 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
   const validVar       = cookieAuth ? 'sessionToken'   : 'token';
   const expiredVar     = cookieAuth ? 'expiredSession' : 'expiredToken';
 
+  // Spec `in: header` params (e.g. anthropic-version) → Karate map clauses sent on
+  // every request, seeded from each param's schema default/example.
+  const headerParamClauses = (operation.parameters ?? [])
+    .filter(p => p.in === 'header')
+    .map(p => `${mapKey(p.name)}: ${karateValueLiteral(String(p.schema?.default ?? p.schema?.example ?? ''))}`);
+
   // Valid-body example: the specs request body (user-edited) or the schema example.
   const exampleObj    = hasBody ? effectiveRequestBody(method, profile.path, operation, spec) : null;
   const validBodyExpr = inlineValidBody(exampleObj);
@@ -59,7 +65,7 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
   const defaultAuthClause = profile.auth_required
     ? `${mapKey(authHeaderName)}: ${authWrap(validVar)}`
     : null;
-  lines.push(`    * configure headers = ${headersMapExpr({ contentType: hasBody, auth: defaultAuthClause })}`);
+  lines.push(`    * configure headers = ${headersMapExpr({ contentType: hasBody, headerParams: headerParamClauses, auth: defaultAuthClause })}`);
 
   const pathParamDefaults = effectivePathParams(method, profile.path);
   if (pathParams.length) {
@@ -91,7 +97,7 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
     // The auth cases differ only by credential + expected status, so they fold into
     // a single data-driven Scenario Outline instead of one near-identical copy each.
     if (cat === 'auth') {
-      buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, authWrap, expiredVar }, lines);
+      buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, authWrap, expiredVar, headerParamClauses }, lines);
       lines.push('');
       return;
     }
@@ -156,7 +162,7 @@ function buildMethodNotAllowedOutline(cases, profile, lines) {
   lines.push(`    Then status 405`);
   lines.push(`    * assert responseTime < ${getConfig().responseTimeThresholdMs}`);
   lines.push(`    * match response == '#object'`);
-  lines.push(`    * assert response.message || response.error || response.detail`);
+  lines.push(`    * assert response.message != null || response.error != null || response.detail != null`);
   lines.push('');
   lines.push(`    Examples:`);
   const rows = cases.map(tc => [tc.id, tc.disallowed_method.toLowerCase()]);
@@ -167,8 +173,9 @@ function buildMethodNotAllowedOutline(cases, profile, lines) {
 // the expected status. Each Examples row supplies the Authorization/Cookie value via
 // a Karate embedded expression (`#(...)`), with `#(null)` driving the missing-header
 // case; the configure-headers step adds the credential only when it isn't null.
-function buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, authWrap, expiredVar }, lines) {
-  const base = hasBody ? `Accept: accept, 'Content-Type': contentType` : `Accept: accept`;
+function buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, authWrap, expiredVar, headerParamClauses = [] }, lines) {
+  const extra = headerParamClauses.length ? `, ${headerParamClauses.join(', ')}` : '';
+  const base  = (hasBody ? `Accept: accept, 'Content-Type': contentType` : `Accept: accept`) + extra;
 
   lines.push(`  @auth`);
   lines.push(`  Scenario Outline: <id> — <desc>`);
@@ -179,7 +186,7 @@ function buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, aut
   lines.push(`    Then status <status>`);
   lines.push(`    * assert responseTime < ${getConfig().responseTimeThresholdMs}`);
   lines.push(`    * match response == '#object'`);
-  lines.push(`    * assert response.message || response.error || response.detail`);
+  lines.push(`    * assert response.message != null || response.error != null || response.detail != null`);
   lines.push('');
   lines.push(`    Examples:`);
   const rows = cases.map(tc => [
@@ -221,9 +228,10 @@ function buildKaratePath(path) {
 // A Karate JS map literal for `configure headers`, e.g.
 //   ({ Accept: accept, 'Content-Type': contentType, Authorization: 'Bearer ' + token })
 // `accept` / `contentType` and the credentials resolve to karate-config.js vars.
-function headersMapExpr({ contentType, auth }) {
+function headersMapExpr({ contentType, headerParams = [], auth }) {
   const parts = [`Accept: accept`];
   if (contentType) parts.push(`'Content-Type': contentType`);
+  parts.push(...headerParams);
   if (auth) parts.push(auth);
   return `({ ${parts.join(', ')} })`;
 }
@@ -253,7 +261,7 @@ function buildKarateAssertions(tc, method, lines) {
     }
   } else if (is4xx(primary)) {
     lines.push(`    * match response == '#object'`);
-    lines.push(`    * assert response.message || response.error || response.detail`);
+    lines.push(`    * assert response.message != null || response.error != null || response.detail != null`);
   }
 
   // Folded-in assertions derived from an observed response body.

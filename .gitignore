@@ -7,3 +7,12 @@ context/*
 TODO.md
 CLAUDE.md
 
+# Karate runner binaries (downloaded by tools/setup-karate.ps1; scripts are tracked)
+tools/*
+tools/jdk/
+tools/karate.jar
+tools/jre.zip
+tools/jre-extract/
+
+# Karate report
+target/*
