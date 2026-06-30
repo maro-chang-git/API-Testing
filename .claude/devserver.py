@@ -11,9 +11,19 @@ request server-side, CORS never applies. The browser refuses to let fetch()
 set a `Cookie` header (it's a forbidden header name), so request-builder.js
 sends it as `X-Proxy-Cookie`; the proxy renames it back to `Cookie` before
 forwarding to the target.
+
+Security: the listener binds **127.0.0.1 only** (loopback), so it is never
+reachable from the LAN — Vite (same host) is the only intended client. Both
+write/forward surfaces are further constrained: `/save` enforces a write-extension
+allowlist plus a loopback-Origin (CSRF) check, and `/proxy` validates every target
+(and redirect hop) against an SSRF guard that blocks private / loopback / link-local
+/ reserved addresses unless the host is opted in via the `PROXY_ALLOW_HOSTS` env var.
 """
 import os
 import json
+import ssl
+import socket
+import ipaddress
 import http.server
 import urllib.request
 import urllib.error
@@ -21,6 +31,73 @@ import urllib.parse
 
 PROXY_PREFIX = '/proxy?url='
 SAVE_PREFIX = '/save?'
+
+# Extensions the browser legitimately writes via POST /save (specs.json, exported
+# test-case JSON, Postman collections, Karate .feature files, karate-config.js).
+# Anything else is rejected so /save can't be coerced into dropping executable or
+# web-servable files (.html/.bat/…) into the repo tree.
+SAVE_ALLOWED_EXTS = {'.json', '.feature', '.js'}
+
+# Origins allowed to POST /save. The browser sets Origin on every fetch POST, and
+# Vite forwards it unchanged (http://localhost:5500). Requiring a loopback origin
+# blocks drive-by CSRF POSTs from a malicious page (which carry their own Origin).
+SAVE_ALLOWED_ORIGIN_HOSTS = {'localhost', '127.0.0.1', '::1'}
+
+# Hostnames the proxy may reach even if they resolve to a private/loopback address.
+# Comma-separated in PROXY_ALLOW_HOSTS, e.g. "127.0.0.1,localhost" to test a local
+# no-CORS API (swaggers/openapi3.json points at 127.0.0.1:8774).
+PROXY_ALLOW_HOSTS = {h.strip().lower() for h in
+                     os.environ.get('PROXY_ALLOW_HOSTS', '').split(',') if h.strip()}
+
+
+class ProxyTargetError(Exception):
+    """A proxy target (or redirect hop) failed the SSRF / scheme validation."""
+
+
+def validate_target(url):
+    """Reject non-http(s) schemes and targets that resolve to a private / loopback
+    / link-local / reserved address (covers cloud-metadata 169.254.169.254), unless
+    the host is allow-listed via PROXY_ALLOW_HOSTS. Raises ProxyTargetError on a
+    blocked target. Re-run on every redirect hop, not just the initial URL."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ('http', 'https'):
+        raise ProxyTargetError(f'scheme not allowed: {parts.scheme or "(none)"}')
+    host = (parts.hostname or '').lower()
+    if not host:
+        raise ProxyTargetError('missing target host')
+    if host in PROXY_ALLOW_HOSTS:
+        return
+    try:
+        infos = socket.getaddrinfo(host, parts.port)
+    except socket.gaierror as e:
+        raise ProxyTargetError(f'cannot resolve host: {host} ({e})')
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise ProxyTargetError(f'target resolves to a blocked address: {ip}')
+
+
+class ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-validate each redirect target so a public URL can't bounce the proxy into
+    a private/internal address (or switch to a non-http scheme) mid-request."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        validate_target(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+# TLS context for outbound proxy requests. Re-enable OpenSSL legacy renegotiation
+# (off by default since OpenSSL 3) so hosts that still require it — e.g. the
+# Databricks Apps host — don't fail with UNSAFE_LEGACY_RENEGOTIATION_DISABLED.
+_tls_ctx = ssl.create_default_context()
+if hasattr(ssl, 'OP_LEGACY_SERVER_CONNECT'):
+    _tls_ctx.options |= ssl.OP_LEGACY_SERVER_CONNECT
+
+# Opener that applies the TLS context and re-validates every redirect hop.
+PROXY_OPENER = urllib.request.build_opener(
+    urllib.request.HTTPSHandler(context=_tls_ctx),
+    ValidatingRedirectHandler(),
+)
 
 # Browser exports and the per-swagger specs file are written here via POST /save.
 # Writes are confined to this directory — see save() for the containment check.
@@ -83,6 +160,12 @@ class DevHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(400, 'Missing target url')
             return
 
+        try:
+            validate_target(target)
+        except ProxyTargetError as e:
+            self.send_error(403, f'Proxy target rejected: {e}')
+            return
+
         fwd_headers = {}
         for key in self.headers:
             lower = key.lower()
@@ -97,14 +180,26 @@ class DevHandler(http.server.SimpleHTTPRequestHandler):
         body = self.rfile.read(length) if length else None
 
         req = urllib.request.Request(target, data=body, method=self.command, headers=fwd_headers)
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                self.relay(resp.status, resp.headers, resp.read())
-        except urllib.error.HTTPError as e:
-            # 4xx/5xx from the target are valid test results — relay them as-is.
-            self.relay(e.code, e.headers, e.read())
-        except urllib.error.URLError as e:
-            self.send_error(502, f'Proxy could not reach target: {e.reason}')
+        # One bounded retry: transient network/TLS hiccups (e.g. the Databricks Apps
+        # host) raise URLError; a single retry smooths them over without masking a real
+        # outage. HTTPError (4xx/5xx) is a valid test result and is relayed immediately.
+        last_err = None
+        for attempt in range(2):
+            try:
+                with PROXY_OPENER.open(req, timeout=30) as resp:
+                    self.relay(resp.status, resp.headers, resp.read())
+                return
+            except urllib.error.HTTPError as e:
+                # 4xx/5xx from the target are valid test results — relay them as-is.
+                self.relay(e.code, e.headers, e.read())
+                return
+            except ProxyTargetError as e:
+                # A redirect hop resolved to a blocked target.
+                self.send_error(403, f'Proxy redirect rejected: {e}')
+                return
+            except urllib.error.URLError as e:
+                last_err = e
+        self.send_error(502, f'Proxy could not reach target: {last_err.reason}')
 
     def relay(self, status, headers, body):
         self.send_response(status)
@@ -127,6 +222,14 @@ class DevHandler(http.server.SimpleHTTPRequestHandler):
         length = int(self.headers.get('Content-Length') or 0)
         body = self.rfile.read(length) if length else b''
 
+        # CSRF guard: only accept writes from a loopback Origin. The browser sets
+        # Origin on every fetch POST and Vite forwards it (http://localhost:5500);
+        # a drive-by POST from a malicious page carries a non-loopback Origin.
+        origin = self.headers.get('Origin')
+        if not origin or urllib.parse.urlsplit(origin).hostname not in SAVE_ALLOWED_ORIGIN_HOSTS:
+            self.send_error(403, 'Save requests must come from a loopback origin')
+            return
+
         query = urllib.parse.urlsplit(self.path).query
         rel = (urllib.parse.parse_qs(query).get('path') or [''])[0]
         if not rel:
@@ -140,6 +243,10 @@ class DevHandler(http.server.SimpleHTTPRequestHandler):
             inside = False  # different drive on Windows
         if not inside:
             self.send_error(403, 'Path must resolve inside output/')
+            return
+
+        if os.path.splitext(target)[1].lower() not in SAVE_ALLOWED_EXTS:
+            self.send_error(403, 'File extension not allowed (.json/.feature/.js only)')
             return
 
         os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -156,5 +263,8 @@ class DevHandler(http.server.SimpleHTTPRequestHandler):
 
 port = int(os.environ.get('PORT', '8000'))
 # Threaded so the browser's parallel module requests don't serialize/stall.
-httpd = http.server.ThreadingHTTPServer(('', port), DevHandler)
+# Bind loopback only — Vite (same host) is the sole intended client; this keeps the
+# /save writer and /proxy forwarder off the LAN.
+httpd = http.server.ThreadingHTTPServer(('127.0.0.1', port), DevHandler)
+print(f'devserver listening on http://127.0.0.1:{port} (loopback only)')
 httpd.serve_forever()
