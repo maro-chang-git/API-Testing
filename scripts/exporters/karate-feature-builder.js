@@ -173,14 +173,22 @@ function buildMethodNotAllowedOutline(cases, profile, lines) {
   lines.push(`  Scenario Outline: <id> — Return 405 when an HTTP method is not allowed (<verb>)`);
   lines.push(`    Given path ${buildKaratePath(profile.path)}`);
   lines.push(`    When method <verb>`);
-  lines.push(`    Then status 405`);
+  // Honour the template's expected_status set (TPL-NEG-009 = [405, 404]) instead
+  // of hardcoding 405 — a server may legitimately answer 404 for an unrouted
+  // method. Match responseStatus against the row's allowed set, like the auth
+  // outline and the regular scenarios.
+  lines.push(`    Then match [<status>] contains responseStatus`);
   lines.push(`    * assert responseTime < ${getConfig().responseTimeThresholdMs}`);
   lines.push(`    * match response == '#object'`);
   lines.push(`    * assert response.message != null || response.error != null || response.detail != null`);
   lines.push('');
   lines.push(`    Examples:`);
-  const rows = cases.map(tc => [tc.id, tc.disallowed_method.toLowerCase()]);
-  renderExamplesTable(['id', 'verb'], rows).forEach(l => lines.push(l));
+  const rows = cases.map(tc => [
+    tc.id,
+    tc.disallowed_method.toLowerCase(),
+    expectedStatuses(tc.expected_status).join(', '),
+  ]);
+  renderExamplesTable(['id', 'verb', 'status'], rows).forEach(l => lines.push(l));
 }
 
 // The auth cases share one request shape and differ only by the credential sent and
