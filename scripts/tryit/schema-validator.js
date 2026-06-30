@@ -165,21 +165,29 @@ export function responseSchema(resDef) {
 function validateValue(value, schema, spec, path, errors) {
   if (!schema) return;
 
-  // Carry the spec's shared schemas so #/definitions/* (Swagger 2) and
-  // #/components/schemas/* (OpenAPI 3) $refs resolve. ajvSchema() deep-clones
-  // and rewrites OpenAPI's `nullable: true`, so the original spec is untouched.
-  const root = ajvSchema({
-    ...schema,
-    ...(spec?.definitions ? { definitions: spec.definitions } : {}),
-    ...(spec?.components  ? { components:  spec.components  } : {}),
-  });
+  // Compiling Ajv (spread spec schemas → ajvSchema() deep-clone → compile) is the
+  // hot cost paid on every Send. Memoize the compiled validator on the response
+  // schema's object identity: a dereferenced spec gives each schema a stable
+  // reference for its lifetime, so the same status reuses one validator and a
+  // swagger reload drops the old entries via GC (WeakMap, no manual eviction).
+  let validate = validatorCache.get(schema);
+  if (!validate) {
+    // Carry the spec's shared schemas so #/definitions/* (Swagger 2) and
+    // #/components/schemas/* (OpenAPI 3) $refs resolve. ajvSchema() deep-clones
+    // and rewrites OpenAPI's `nullable: true`, so the original spec is untouched.
+    const root = ajvSchema({
+      ...schema,
+      ...(spec?.definitions ? { definitions: spec.definitions } : {}),
+      ...(spec?.components  ? { components:  spec.components  } : {}),
+    });
 
-  let validate;
-  try {
-    validate = newAjv().compile(root);
-  } catch (e) {
-    errors.push({ path, msg: `schema could not be compiled (${e.message})` });
-    return;
+    try {
+      validate = newAjv().compile(root);
+    } catch (e) {
+      errors.push({ path, msg: `schema could not be compiled (${e.message})` });
+      return;
+    }
+    validatorCache.set(schema, validate);
   }
 
   if (validate(value)) return;
@@ -188,15 +196,19 @@ function validateValue(value, schema, spec, path, errors) {
   }
 }
 
+// Compiled-validator memo, keyed on the response schema object (see validateValue).
+const validatorCache = new WeakMap();
+
 // Ajv tuned to tolerate OpenAPI-flavoured JSON Schema:
 //   strict:false         — ignore OpenAPI-only keywords (example, xml, discriminator, readOnly…)
 //   allErrors:true       — collect every problem instead of stopping at the first
 //   allowUnionTypes:true — accept the type arrays produced by nullable handling
 // allOf / anyOf / oneOf / additionalProperties are core keywords Ajv enforces by
 // default; addFormats() registers the string/numeric format validators (date-time,
-// email, uri, uuid, int32/int64…) so `format` is checked too. A fresh instance per
-// call keeps validation stateless and avoids Ajv's "schema already exists" cache
-// errors should a spec carry $id/id keywords.
+// email, uri, uuid, int32/int64…) so `format` is checked too. Each instance is
+// single-use at compile time — keeping compilation stateless and avoiding Ajv's
+// "schema already exists" cache errors should a spec carry $id/id keywords — while
+// the *compiled* validator it produces is memoized per schema in validateValue().
 function newAjv() {
   const ajv = new Ajv({ strict: false, allErrors: true, allowUnionTypes: true });
   addFormats(ajv);
