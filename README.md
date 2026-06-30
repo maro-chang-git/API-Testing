@@ -16,7 +16,7 @@ Pure ES modules with no build step. Dev tooling (Vite, ESLint) is available via 
 - **Result tracking** — filter by Untested / Pass / Fail; results persist per endpoint in `localStorage` and are included in the JSON export
 - **Three export formats** — JSON, a Postman Collection v2.1 (with `pm.test` scripts), and a Karate `.feature` file
 - **Configurable defaults** — auth tokens, default headers, and the response-time threshold live in `data/config.json`
-- **CORS handling** — the Base URL is editable and a one-click local dev-server proxy (`/proxy?url=`) prefix is provided
+- **Connection-failure handling** — when a request can't reach the API (blank/scheme-only Base URL, CORS, mixed content, or server down), the editable Base URL and a one-click local dev-server proxy (`/proxy?url=`) prefix help diagnose and bypass it
 
 ## How it works
 
@@ -189,9 +189,16 @@ The **Try It** tab sends real HTTP requests against the selected endpoint.
 - **Request Body** — pre-filled with an example generated from the request schema
 - **Send Request** — fires a `fetch()` and shows status, response headers, formatted body, and a **Schema** tab with validation results. A `text/event-stream` (SSE) response is detected automatically: the reconstructed message text is shown above the raw frames, and schema validation / data-driven generation are skipped (a stream carries no JSON body)
 
-### CORS
+### When a request can't reach the API
 
-Browser `fetch()` is subject to CORS. If the API server doesn't send CORS headers, the request is blocked. Options:
+A browser `fetch()` that fails before any HTTP response throws an opaque `TypeError: Failed to fetch` — the browser deliberately hides the real cause. The Try It tab reports this as **"Request failed (could not reach the API)"** and lists the candidates, because it can be any of:
+
+- **Blank or scheme-only Base URL** (e.g. just `https://`, which a host-less spec yields) — the most common culprit; check the Base URL field
+- **CORS** — the API server didn't send `Access-Control-Allow-Origin` headers
+- **Mixed content** — an `https://` page can't call an `http://` API
+- **Server unreachable** — DNS failure, connection refused, or TLS error
+
+If the cause is CORS (or you just want to bypass it), the options are:
 
 1. Change the Base URL to a local instance of the API (e.g. `http://localhost:8080`)
 2. Click **🔗 Proxy** to prefix the Base URL with the local dev-server proxy (`/proxy?url=`). The server forwards the request server-side, so CORS never applies. Because browsers won't let `fetch()` set a `Cookie` header, the Try It tab sends it as `X-Proxy-Cookie` and the proxy renames it back to `Cookie` before forwarding. The proxy also drops the browser's `Origin`/`Referer`, so APIs that reject direct browser calls (e.g. Anthropic, which otherwise demands `anthropic-dangerous-direct-browser-access`) accept the forwarded request. This requires serving the page with `devserver.py` (below).

@@ -482,8 +482,8 @@ export async function sendRequest() {
       stream,
     });
   } catch (err) {
-    const isCors = err.message === 'Failed to fetch' || err.message?.includes('NetworkError');
-    showError(err.message, isCors);
+    const isNetworkFail = err.message === 'Failed to fetch' || err.message?.includes('NetworkError');
+    showError(err.message, isNetworkFail);
   } finally {
     btn.disabled = false;
     btn.textContent = 'Send Request';
@@ -606,18 +606,36 @@ function hideTcComparison() {
   if (el) el.style.display = 'none';
 }
 
-function showError(msg, isCors = false) {
+function showError(msg, isNetworkFail = false) {
   const panel = document.getElementById('rb-response');
   panel.style.display = '';
   document.getElementById('rb-res-status').innerHTML =
-    `<span class="status s5xx">${isCors ? 'CORS Blocked' : 'Network Error'}</span>`;
+    `<span class="status s5xx">${isNetworkFail ? 'Request failed (could not reach the API)' : 'Network Error'}</span>`;
   document.getElementById('rb-res-url').textContent = '';
   document.getElementById('rb-res-headers').textContent = '';
   const errBodyEl = document.getElementById('rb-res-body');
   errBodyEl.className = 'rb-res-pane';
-  errBodyEl.textContent = isCors
-    ? `CORS policy blocked this request (${msg}).\n\nTo fix:\n  1. Change the Base URL (top-left) to a local instance of the API,\n     e.g. http://localhost:8080/api/v1\n\n  2. Or click 🔗 Proxy to route through the local dev-server proxy:\n     ${location.origin}/proxy?url= + original URL\n     (requires serving the page with devserver.py)\n\n  3. Or install a browser extension that disables CORS checks\n     (e.g. "CORS Unblock" for Chrome/Firefox — for dev use only).`
-    : msg;
+  // An opaque `Failed to fetch` is indistinguishable from JS — it covers CORS,
+  // a blank/scheme-only Base URL, mixed content, and an unreachable server
+  // alike. Don't blame CORS alone; surface the current Base URL (the most
+  // common culprit) and list every candidate cause.
+  if (isNetworkFail) {
+    const baseUrl = document.getElementById('rb-base-url')?.value ?? '';
+    errBodyEl.textContent =
+      `Request failed — could not reach the API (${msg}).\n\n` +
+      `No HTTP status was returned, so this is a connection-level failure, not a\n` +
+      `server response. Likely causes:\n\n` +
+      `  1. Empty or scheme-only Base URL — current value: "${baseUrl}".\n` +
+      `     A host-less spec yields just "https://". Check the Base URL field (top-left).\n\n` +
+      `  2. CORS — the API sent no Access-Control-Allow-Origin header.\n` +
+      `     Click 🔗 Proxy to route through the local dev-server proxy\n` +
+      `     (${location.origin}/proxy?url= + original URL; requires devserver.py),\n` +
+      `     or point Base URL at a local instance.\n\n` +
+      `  3. Mixed content — an https:// page cannot call an http:// API.\n\n` +
+      `  4. Server unreachable — DNS failure, connection refused, or TLS error.`;
+  } else {
+    errBodyEl.textContent = msg;
+  }
 }
 
 export function saveResult(actualStatus, elapsed, passed) {
