@@ -10,7 +10,7 @@
 //   {
 //     swaggerId, title, file, generatedAt, updatedAt,
 //     swagger:   { baseUrl, auth: { type, in, token, expiredToken, invalidTokenValue }, headers: { accept, contentType } },
-//     endpoints: { "GET /path": { method, path, summary, authRequired, requestType, pathParams, headerParams?, responses: { "200", error }, baseline? } }
+//     endpoints: { "GET /path": { method, path, summary, authRequired, requestType, responseBodyType?, sseDialect?, pathParams, headerParams?, responses: { "200", error }, baseline? } }
 //   }
 
 import { getBaseUrl, isCookieAuth } from './tryit/request-core.js';
@@ -212,6 +212,20 @@ export function effectiveRequestType(method, path, fallback = DEFAULT_REQUEST_TY
   return getEndpointSpecs(method, path)?.requestType ?? fallback;
 }
 
+// Effective response body type (json | sse | ndjson | text | binary): a persisted
+// override wins, otherwise the caller's auto-detected fallback. Drives the 2xx
+// success assertions in both exporters + Try It. Not scaffolded, so auto-detection
+// runs until the user overrides it.
+export function effectiveResponseBodyType(method, path, fallback) {
+  return getEndpointSpecs(method, path)?.responseBodyType ?? fallback;
+}
+
+// Effective SSE dialect (openai | anthropic | generic): persisted override wins,
+// otherwise the caller's sniffed fallback.
+export function effectiveSseDialect(method, path, fallback) {
+  return getEndpointSpecs(method, path)?.sseDialect ?? fallback;
+}
+
 export function effectiveHeaders() {
   const cfg = getConfig();
   const h = _model?.swagger?.headers;
@@ -314,6 +328,25 @@ export function setRequestType(method, path, value) {
   const key = specKey(method, path);
   const e = (_model.endpoints[key] ||= { method: String(method).toUpperCase(), path });
   e.requestType = value;
+  _model.updatedAt = new Date().toISOString();
+}
+
+// Sets the response body type override (json | sse | ndjson | text | binary).
+// Persisted immediately by the toolbar dropdown handler; absence = auto-detect.
+export function setResponseBodyType(method, path, value) {
+  if (!_model) return;
+  const key = specKey(method, path);
+  const e = (_model.endpoints[key] ||= { method: String(method).toUpperCase(), path });
+  e.responseBodyType = value;
+  _model.updatedAt = new Date().toISOString();
+}
+
+// Sets the SSE dialect override (openai | anthropic | generic).
+export function setSseDialect(method, path, value) {
+  if (!_model) return;
+  const key = specKey(method, path);
+  const e = (_model.endpoints[key] ||= { method: String(method).toUpperCase(), path });
+  e.sseDialect = value;
   _model.updatedAt = new Date().toISOString();
 }
 

@@ -22,8 +22,12 @@ export function isEventStream(contentType = '', body = '') {
   return first.startsWith('data:') || first.startsWith('event:');
 }
 
-/** Parses a raw SSE body → { events: [{ event, data, json }], text, count }. */
-export function parseEventStream(raw = '') {
+/**
+ * Parses a raw SSE body → { events: [{ event, data, json }], text, count }.
+ * `dialect` (openai | anthropic | generic) selects the delta path used to
+ * reconstruct the streamed text; 'generic' tries both common shapes.
+ */
+export function parseEventStream(raw = '', dialect = 'generic') {
   const events = [];
   const blocks = String(raw).replace(/\r\n/g, '\n').split(/\n{2,}/);
 
@@ -49,19 +53,30 @@ export function parseEventStream(raw = '') {
     events.push({ event: name, data, json });
   }
 
-  const text = events.map(e => deltaText(e.json)).join('');
+  const text = events.map(e => deltaText(e.json, dialect)).join('');
   return { events, text, count: events.length };
 }
 
-// Best-effort incremental text from a parsed SSE data object, covering the
-// common streaming-chat shapes (Anthropic + OpenAI). Returns '' for control
-// frames (message_start, ping, message_stop, …).
-function deltaText(json) {
+// True when the raw SSE body contains the dialect's terminal marker (OpenAI
+// `data: [DONE]`, Anthropic `event: message_stop`). Generic has no fixed terminal.
+export function terminalSeen(raw = '', dialect = 'generic') {
+  const marker = dialect === 'openai' ? '[DONE]'
+               : dialect === 'anthropic' ? 'message_stop'
+               : null;
+  return marker ? String(raw).includes(marker) : false;
+}
+
+// Best-effort incremental text from a parsed SSE data object. A concrete dialect
+// uses its own delta path; 'generic' tries both common shapes. Returns '' for
+// control frames (message_start, ping, message_stop, …).
+function deltaText(json, dialect = 'generic') {
   if (!json || typeof json !== 'object') return '';
-  // Anthropic: { type: 'content_block_delta', delta: { type: 'text_delta', text } }
-  if (json.delta && typeof json.delta.text === 'string') return json.delta.text;
-  // OpenAI: { choices: [{ delta: { content } }] }
-  const choice = Array.isArray(json.choices) ? json.choices[0] : null;
-  if (choice && choice.delta && typeof choice.delta.content === 'string') return choice.delta.content;
-  return '';
+  const anthropic = () => (json.delta && typeof json.delta.text === 'string') ? json.delta.text : '';
+  const openai = () => {
+    const choice = Array.isArray(json.choices) ? json.choices[0] : null;
+    return (choice && choice.delta && typeof choice.delta.content === 'string') ? choice.delta.content : '';
+  };
+  if (dialect === 'anthropic') return anthropic();
+  if (dialect === 'openai')    return openai();
+  return anthropic() || openai();   // generic: whichever shape matches
 }

@@ -465,18 +465,16 @@ export async function sendRequest() {
 
     const rawText     = await res.text();
     const contentType = res.headers.get('content-type') || '';
-    // Route response handling by the endpoint's manual request type. A 'stream'
-    // selection forces SSE parsing; everything else still sniffs the body so a
-    // mislabeled stream is caught (belt-and-suspenders). Not-yet-implemented
-    // types (upload / download / …) fall back to this regular handling for now.
-    // TODO: add dedicated upload (FormData) / download (blob) handlers here.
-    const forceStream = _profile.request_type === 'stream';
-    const stream      = (forceStream || isEventStream(contentType, rawText))
-      ? parseEventStream(rawText)
-      : null;
+    // Route response handling by the endpoint's response body type. 'sse' forces
+    // SSE parsing; 'json' (or unset) also sniffs the body so a mislabeled stream is
+    // still caught (belt-and-suspenders). ndjson / text / binary are shown raw.
+    const bodyType = _profile.response_body_type || 'json';
+    const dialect  = _profile.sse_dialect || 'generic';
+    const isSse    = bodyType === 'sse' || (bodyType === 'json' && isEventStream(contentType, rawText));
+    const stream   = isSse ? parseEventStream(rawText, dialect) : null;
 
     let prettyBody = rawText;
-    if (!stream) {
+    if (!stream && bodyType === 'json') {
       try { prettyBody = JSON.stringify(JSON.parse(rawText), null, 2); } catch { /* not JSON — keep raw text */ }
     }
 
@@ -488,6 +486,7 @@ export async function sendRequest() {
       elapsed,
       url,
       stream,
+      bodyType,
     });
   } catch (err) {
     const isNetworkFail = err.message === 'Failed to fetch' || err.message?.includes('NetworkError');
@@ -537,7 +536,7 @@ function buildBody() {
 
 // ── Response display ──────────────────────────────────────────────────────────
 
-function showResponse({ status, statusText, headers, body, elapsed, url, stream = null }) {
+function showResponse({ status, statusText, headers, body, elapsed, url, stream = null, bodyType = 'json' }) {
   const panel = document.getElementById('rb-response');
   panel.style.display = '';
 
@@ -569,11 +568,16 @@ function showResponse({ status, statusText, headers, body, elapsed, url, stream 
     bodyEl.className   = 'rb-res-pane' + (isJson(body) ? ' json' : '');
   }
 
-  // SSE bodies aren't JSON — schema validation doesn't apply; show an info note.
+  // Only a JSON body is schema-validatable. SSE / NDJSON / text / binary show an
+  // info note instead (matching the endpoint's response body type).
   if (stream) {
     const schemaEl = document.getElementById('rb-res-schema');
     if (schemaEl) schemaEl.innerHTML =
       schemaMsg('info', `Streaming response (text/event-stream) — ${stream.count} events; JSON-schema validation not applicable.`);
+  } else if (bodyType !== 'json') {
+    const schemaEl = document.getElementById('rb-res-schema');
+    if (schemaEl) schemaEl.innerHTML =
+      schemaMsg('info', `Response body type is ${bodyType.toUpperCase()} — JSON-schema validation not applicable.`);
   } else {
     validateResponseSchema(status, body);
   }

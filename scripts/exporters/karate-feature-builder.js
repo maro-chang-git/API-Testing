@@ -5,6 +5,7 @@ import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectiveHeaderParam
 import { getTestBody, BODY_KIND } from './body-builder.js';
 import { expectedStatuses } from '../core/template-matcher.js';
 import { is2xx, is4xx } from '../core/status-utils.js';
+import { SSE_DIALECTS } from '../core/response-body-types.js';
 import { normalizeAssertion, pathParamNames, methodHasBody, filenameSlug } from './export-shared.js';
 
 /**
@@ -277,20 +278,15 @@ function buildKarateAssertions(tc, method, lines) {
     const line = karateAssertLine(tc.assertion);
     if (line) lines.push(`    ${line}`);
   } else if (is2xx(primary)) {
-    // Route the 2xx body assertions by the endpoint's manual request type.
-    switch (tc.request_type) {
-      case 'stream':
-        // text/event-stream responses arrive as a raw string, not a JSON object —
-        // assert the stream shape instead of matching an object.
-        lines.push(`    * match responseType == 'string'`);
-        lines.push(`    * match response contains 'data:'`);
-        break;
-      default:
-        // Not-yet-implemented types (upload / download / graphql / …) fall back to
-        // the regular JSON-body assertions until a dedicated handler is added.
-        if (tc.request_type && tc.request_type !== 'regular') {
-          lines.push(`    # TODO: ${tc.request_type} handler not yet included — using regular JSON assertions`);
-        }
+    // Route the 2xx body assertions by the endpoint's response body type.
+    switch (tc.response_body_type) {
+      case 'sse':       karateSseAssertions(tc, lines); break;
+      case 'ndjson':    karateNdjsonAssertions(lines);  break;
+      case 'text':      lines.push(`    * match responseType == 'string'`);
+                        lines.push(`    * assert response.length > 0`); break;
+      case 'binary':    lines.push(`    * assert responseBytes.length > 0`);
+                        lines.push(`    * match responseHeaders['Content-Type'][0] == '#present'`); break;
+      default:          // 'json' (and undefined) — the regular object/shape checks.
         // A folded array-root assertion will assert `response == '#array'`; skip the
         // generic object match so the scenario doesn't contradict itself.
         if (!folded.some(a => a.kind === 'array-root')) lines.push(`    * match response == '#object'`);
@@ -308,6 +304,37 @@ function buildKarateAssertions(tc, method, lines) {
     const line = karateAssertLine(a);
     if (line) lines.push(`    ${line}`);
   }
+}
+
+// SSE (text/event-stream): the body is a raw string of `data:` frames. Assert the
+// stream shape, plus the dialect's terminal marker + a delta-path token when a
+// concrete dialect is known. Karate can't reconstruct the streamed text, so the
+// delta-token `contains` is the closest proxy for "non-empty streamed content".
+function karateSseAssertions(tc, lines) {
+  lines.push(`    * match responseType == 'string'`);
+  lines.push(`    * match response contains 'data:'`);
+  const d = SSE_DIALECTS[tc.sse_dialect];
+  if (d?.terminal) lines.push(`    * match response contains '${d.terminal}'`);
+  const token = sseDeltaToken(tc.sse_dialect);
+  if (token) lines.push(`    * match response contains '${token}'`);
+}
+
+// A token that must appear in the raw SSE body for the given dialect's delta path
+// (proxy for "the stream carried incremental content").
+function sseDeltaToken(dialect) {
+  if (dialect === 'openai')    return 'content';
+  if (dialect === 'anthropic') return 'content_block_delta';
+  return null;
+}
+
+// NDJSON: a raw string of newline-delimited JSON. Assert ≥1 non-empty line and
+// that the first one parses as JSON (`* json` throws on invalid input).
+function karateNdjsonAssertions(lines) {
+  lines.push(`    * match responseType == 'string'`);
+  lines.push(`    * def ndjsonLines = response.trim().split('\\n')`);
+  lines.push(`    * assert ndjsonLines.length >= 1`);
+  lines.push(`    * json ndjsonFirst = ndjsonLines[0]`);
+  lines.push(`    * match ndjsonFirst == '#present'`);
 }
 
 function karateAssertLine(a) {

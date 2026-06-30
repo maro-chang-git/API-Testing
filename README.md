@@ -132,7 +132,8 @@ When an endpoint is selected, `core/template-matcher.js` builds a profile from t
 | `has_body` | Operation has an `in: body` parameter (Swagger 2) or a `requestBody` (OpenAPI 3) |
 | `auth_required` | The operation **or the spec root** declares a non-empty `security` requirement. A `{}` entry (anonymous allowed) or an operation-level `security: []` (auth disabled) means **not** required. |
 | `auth_type` | Name of the first security scheme (e.g. `OAuth2`, `ApiKeyAuth`, `cookieAuth`) |
-| `request_type` / `response_is_stream` | The endpoint's **manual** request type (toolbar dropdown, persisted per-endpoint in `specs.json`, default `regular`; no spec auto-detection). `stream` sets `response_is_stream` and drives SSE-aware Try It + export handling; not-yet-implemented types (`upload`, `download`, …) route to a TODO seam that falls back to the regular handler |
+| `request_type` | The endpoint's **manual** request type (toolbar dropdown, persisted per-endpoint in `specs.json`, default `regular`; no spec auto-detection). Gates which templates match and the request-side handler; not-yet-implemented types (`upload`, `download`, …) route to a TODO seam that falls back to the regular handler |
+| `response_body_type` / `sse_dialect` | The endpoint's response body type (`json \| sse \| ndjson \| text \| binary`) — **auto-detected** from the spec's 2xx content type (with a `request_type` hint), **overridable** per endpoint in `specs.json`. Drives the 2xx success assertions in both exporters + Try It. `sse` additionally carries an `sse_dialect` (`openai \| anthropic \| generic`, sniffed from host/schema) supplying the terminal marker + delta path |
 
 Each template declares an `applies_to` rule. A template is matched only when **all** its conditions satisfy the endpoint profile.
 

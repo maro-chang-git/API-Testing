@@ -42,6 +42,16 @@
     <select id="f-request-type" disabled title="Manual per-endpoint request type — routes Try It + export handlers. Saved to specs.json.">
     </select>
   </div>
+  <div class="toolbar-group">
+    <label>Response Body</label>
+    <select id="f-response-type" disabled title="Response body type — drives the 2xx success assertions. Auto-detected from the spec; override saved to specs.json.">
+    </select>
+  </div>
+  <div class="toolbar-group" id="sse-dialect-group" style="display:none;">
+    <label>SSE Dialect</label>
+    <select id="f-sse-dialect" disabled title="SSE dialect — terminal marker + delta path used by SSE assertions. Sniffed from host/schema; override saved to specs.json.">
+    </select>
+  </div>
 
   <div class="toolbar-divider"></div>
 

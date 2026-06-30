@@ -5,6 +5,7 @@ import { getTestBody, BODY_KIND } from './body-builder.js';
 import { expectedStatuses } from '../core/template-matcher.js';
 import { CATEGORY_ORDER, CATEGORY_LABEL } from '../core/case-order.js';
 import { is2xx, is4xx } from '../core/status-utils.js';
+import { SSE_DIALECTS } from '../core/response-body-types.js';
 import { normalizeAssertion, pathParamNames, methodHasBody, filenameSlug } from './export-shared.js';
 
 /**
@@ -233,41 +234,103 @@ export function getTestScripts(tc) {
 // Category / status-aware assertions for template-generated cases. The body
 // shape is keyed off the primary (first) status; the POST-created check fires
 // when 201 is among the accepted statuses.
+// ── Non-JSON response-body assertion blocks ─────────────────────────────────────
+
+// SSE (text/event-stream): assert the content-type + a data: frame, then — when a
+// concrete dialect is known — the dialect's terminal marker and a non-empty
+// reconstructed text (an inline `data:`-line parse using the dialect delta path).
+function postmanSseBlocks(tc) {
+  const blocks = [[
+    `pm.test('Streaming (text/event-stream) response', function () {`,
+    `  pm.expect(pm.response.headers.get('Content-Type') || '').to.include('text/event-stream');`,
+    `  pm.expect(pm.response.text()).to.include('data:');`,
+    `});`,
+  ]];
+  const d = SSE_DIALECTS[tc.sse_dialect];
+  if (d?.terminal) {
+    blocks.push([
+      `pm.test('SSE stream terminates (${tc.sse_dialect})', function () {`,
+      `  pm.expect(pm.response.text()).to.include('${d.terminal}');`,
+      `});`,
+    ]);
+  }
+  if (d?.deltaPath) {
+    // Reconstruct the streamed text from the data: frames using the dialect's
+    // delta path, then assert it is non-empty.
+    const extract = tc.sse_dialect === 'openai'
+      ? `(j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content) || ''`
+      : `(j.delta && j.delta.text) || ''`;
+    blocks.push([
+      `pm.test('SSE reconstructed text is non-empty (${tc.sse_dialect})', function () {`,
+      `  var text = pm.response.text().split(/\\n/)`,
+      `    .filter(function (l) { return l.indexOf('data:') === 0; })`,
+      `    .map(function (l) { return l.slice(5).trim(); })`,
+      `    .filter(function (dt) { return dt && dt !== '${d.terminal || '[DONE]'}'; })`,
+      `    .map(function (dt) { try { var j = JSON.parse(dt); return ${extract}; } catch (e) { return ''; } })`,
+      `    .join('');`,
+      `  pm.expect(text.length, 'reconstructed text').to.be.above(0);`,
+      `});`,
+    ]);
+  }
+  return blocks;
+}
+
+// NDJSON: assert ≥1 line and that the first line parses as JSON.
+function postmanNdjsonBlock() {
+  return [
+    `pm.test('Response is NDJSON (line-delimited JSON)', function () {`,
+    `  var lines = pm.response.text().trim().split(/\\n/).filter(function (l) { return l.trim().length; });`,
+    `  pm.expect(lines.length, 'line count').to.be.above(0);`,
+    `  pm.expect(function () { JSON.parse(lines[0]); }).to.not.throw();`,
+    `});`,
+  ];
+}
+
+// Plain text: non-empty body, no JSON assertion.
+function postmanTextBlock() {
+  return [
+    `pm.test('Response is non-empty text', function () {`,
+    `  pm.expect(pm.response.text().length).to.be.above(0);`,
+    `});`,
+  ];
+}
+
+// Binary: content-type present + non-empty body only.
+function postmanBinaryBlock() {
+  return [
+    `pm.test('Response is a non-empty binary body', function () {`,
+    `  pm.expect(pm.response.headers.get('Content-Type') || '', 'Content-Type').to.have.length.above(0);`,
+    `  pm.expect(pm.response.stream && pm.response.stream.length || pm.response.text().length).to.be.above(0);`,
+    `});`,
+  ];
+}
+
 function templateBlocks(tc, statuses) {
   const out = [];
   const primary = statuses[0];
 
   if (is2xx(primary)) {
-    // Route the 2xx body assertions by the endpoint's manual request type.
-    if (tc.request_type === 'stream') {
-      // text/event-stream responses aren't JSON — assert the stream shape instead.
-      out.push([
-        `pm.test('Streaming (text/event-stream) response', function () {`,
-        `  pm.expect(pm.response.headers.get('Content-Type') || '').to.include('text/event-stream');`,
-        `  pm.expect(pm.response.text()).to.include('data:');`,
-        `});`,
-      ]);
-    } else {
-      // Not-yet-implemented types (upload / download / graphql / …) fall back to
-      // the regular JSON-body assertions until a dedicated handler is added.
-      if (tc.request_type && tc.request_type !== 'regular') {
+    // Route the 2xx body assertions by the endpoint's response body type.
+    switch (tc.response_body_type) {
+      case 'sse':    out.push(...postmanSseBlocks(tc)); break;
+      case 'ndjson': out.push(postmanNdjsonBlock());    break;
+      case 'text':   out.push(postmanTextBlock());      break;
+      case 'binary': out.push(postmanBinaryBlock());    break;
+      default: {     // 'json' (and undefined) — the regular JSON shape checks.
         out.push([
-          `// TODO: ${tc.request_type} handler not yet included — using regular JSON assertions`,
-        ]);
-      }
-      out.push([
-        `pm.test('Response body is valid JSON', function () {`,
-        `  pm.response.to.have.jsonBody();`,
-        `});`,
-      ]);
-      if (tc.method === 'POST' && statuses.includes(201)) {
-        out.push([
-          `pm.test('Created resource is returned with an id', function () {`,
-          `  var json = pm.response.json();`,
-          `  pm.expect(json).to.be.an('object');`,
-          `  pm.expect(json).to.have.property('id');`,
+          `pm.test('Response body is valid JSON', function () {`,
+          `  pm.response.to.have.jsonBody();`,
           `});`,
         ]);
+        if (tc.method === 'POST' && statuses.includes(201)) {
+          out.push([
+            `pm.test('Created resource is returned with an id', function () {`,
+            `  var json = pm.response.json();`,
+            `  pm.expect(json).to.be.an('object');`,
+            `  pm.expect(json).to.have.property('id');`,
+            `});`,
+          ]);
+        }
       }
     }
   } else if (is4xx(primary)) {

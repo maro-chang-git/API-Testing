@@ -90,7 +90,8 @@ export function matchTemplates(profile, templates) {
     purpose: tpl.purpose,
     expected_status: tpl.expected_status,
     request_type: profile.request_type,
-    response_is_stream: profile.response_is_stream,
+    response_body_type: profile.response_body_type,
+    sse_dialect: profile.sse_dialect,
     notes: tpl.notes,
   }));
 }

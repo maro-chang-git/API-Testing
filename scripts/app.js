@@ -8,6 +8,8 @@ import * as specsStore from './specs-store.js';
 import { generateTestCasesFromResponse } from './generate/response-test-generator.js';
 import { compareTestCases } from './core/case-order.js';
 import { REQUEST_TYPES, DEFAULT_REQUEST_TYPE, requestTypeOptionLabel } from './core/request-types.js';
+import { RESPONSE_BODY_TYPES, SSE_DIALECTS, detectResponseBodyType, sniffSseDialect } from './core/response-body-types.js';
+import { responseSchema } from './tryit/schema-validator.js';
 import { expandMethodNotAllowed } from './core/case-expander.js';
 import { filterAndSort } from './ui/filter-sort.js';
 import { esc } from './ui/dom.js';
@@ -146,10 +148,10 @@ function onEndpointChange(value) {
   results = resultsStore[currentEndpointKey] ||= {};
   currentOperation = operation;
 
-  // Reflect the saved request type (loaded with the rest of the specs) into the
-  // toolbar dropdown, then derive cases for it.
-  syncRequestTypeSelect(method, path);
+  // Derive cases for the persisted/auto-detected types, then reflect them into the
+  // toolbar dropdowns (request type, response body type, SSE dialect).
   deriveAndRenderEndpoint(method, path, operation);
+  syncTypeSelectors();
 }
 
 // Profiles the endpoint (applying the persisted auth-required + request-type
@@ -163,9 +165,18 @@ function deriveAndRenderEndpoint(method, path, operation) {
   currentProfile.auth_required =
     specsStore.effectiveAuthRequired(method, path, currentProfile.auth_required);
   // Request type is a manual, per-endpoint selection (no spec auto-detection); it
-  // drives the handler seam in the exporters + Try It (e.g. 'stream' → SSE).
-  currentProfile.request_type       = specsStore.effectiveRequestType(method, path);
-  currentProfile.response_is_stream = currentProfile.request_type === 'stream';
+  // gates which templates match and drives the request-side handler seam.
+  const requestType = specsStore.effectiveRequestType(method, path);
+  currentProfile.request_type = requestType;
+  // Response body type drives the 2xx success assertions (exporters + Try It).
+  // Auto-detected from the spec's 2xx content type (with a request-type hint),
+  // overridable per endpoint in specs.json.
+  const autoBodyType = detectResponseBodyType(responseContentTypes(operation), requestType);
+  const bodyType = specsStore.effectiveResponseBodyType(method, path, autoBodyType);
+  currentProfile.response_body_type = bodyType;
+  currentProfile.sse_dialect = bodyType === 'sse'
+    ? specsStore.effectiveSseDialect(method, path, sniffDialect(method, path, operation))
+    : null;
   matchedCases     = matchTemplates(currentProfile, templates);
 
   // Expand TPL-NEG-009 into one case per disallowed method (every standard HTTP
@@ -190,16 +201,73 @@ async function onRequestTypeChange(value) {
   const { method, path } = currentProfile;
   specsStore.setRequestType(method, path, value);
   deriveAndRenderEndpoint(method, path, currentOperation);
+  syncTypeSelectors();   // request type may flip the auto response-body type
   const saved = await specsStore.saveSpecs();
   flashButton('btn-save-specs', 'Save Specs', saved ? 'Type saved ✓' : 'Saved locally');
 }
 
-// Mirrors the saved/effective request type into the toolbar dropdown and enables it.
-function syncRequestTypeSelect(method, path) {
-  const sel = document.getElementById('f-request-type');
-  if (!sel) return;
-  sel.value = specsStore.effectiveRequestType(method, path);
+// Persists the response-body-type override and re-derives so the new 2xx assertions
+// take effect (and the SSE-dialect row shows/hides).
+async function onResponseTypeChange(value) {
+  if (!currentProfile) return;
+  const { method, path } = currentProfile;
+  specsStore.setResponseBodyType(method, path, value);
+  deriveAndRenderEndpoint(method, path, currentOperation);
+  syncTypeSelectors();
+  const saved = await specsStore.saveSpecs();
+  flashButton('btn-save-specs', 'Save Specs', saved ? 'Type saved ✓' : 'Saved locally');
+}
+
+// Persists the SSE-dialect override and re-derives so the per-dialect terminal /
+// delta assertions take effect.
+async function onSseDialectChange(value) {
+  if (!currentProfile) return;
+  const { method, path } = currentProfile;
+  specsStore.setSseDialect(method, path, value);
+  deriveAndRenderEndpoint(method, path, currentOperation);
+  syncTypeSelectors();
+  const saved = await specsStore.saveSpecs();
+  flashButton('btn-save-specs', 'Save Specs', saved ? 'Type saved ✓' : 'Saved locally');
+}
+
+// Mirrors the effective request type / response body type / SSE dialect (from
+// currentProfile, just derived) into the toolbar dropdowns and toggles visibility.
+function syncTypeSelectors() {
+  if (!currentProfile) return;
+  const reqSel = document.getElementById('f-request-type');
+  const resSel = document.getElementById('f-response-type');
+  const sseSel = document.getElementById('f-sse-dialect');
+  if (reqSel) reqSel.value = currentProfile.request_type;
+  if (resSel) resSel.value = currentProfile.response_body_type;
+  if (sseSel && currentProfile.sse_dialect) sseSel.value = currentProfile.sse_dialect;
   setRequestTypeVisible(true);
+}
+
+// The endpoint's 2xx response media types (for response-body-type auto-detection).
+function responseContentTypes(operation) {
+  const responses = operation?.responses ?? {};
+  const out = [];
+  for (const [code, resp] of Object.entries(responses)) {
+    if (!/^2\d\d$/.test(code)) continue;
+    if (resp?.content) out.push(...Object.keys(resp.content));
+  }
+  return out;
+}
+
+// Best-effort SSE dialect from the effective host / header names / 2xx schema shape.
+function sniffDialect(method, path, operation) {
+  let host = '';
+  try { host = new URL(specsStore.effectiveBaseUrl(method, path)).host; } catch { /* relative/blank base */ }
+  const headerNames = Object.keys(specsStore.effectiveHeaderParams(method, path, operation) ?? {});
+  const schema = responseSchema(twoxxResponse(operation) ?? {});
+  const schemaHasChoices = !!schema?.properties?.choices;
+  return sniffSseDialect({ host, headerNames, schemaHasChoices });
+}
+
+function twoxxResponse(operation) {
+  const responses = operation?.responses ?? {};
+  const code = Object.keys(responses).find(c => /^2\d\d$/.test(c));
+  return code ? responses[code] : null;
 }
 
 function runTc(tcId) {
@@ -389,6 +457,16 @@ function bindFilters() {
     onRequestTypeChange(e.target.value);
   });
 
+  // Response-body-type + SSE-dialect dropdowns: populate once, persist + re-derive
+  // on change. (Response type drives the 2xx success assertions.)
+  populateResponseTypeSelects();
+  document.getElementById('f-response-type').addEventListener('change', e => {
+    onResponseTypeChange(e.target.value);
+  });
+  document.getElementById('f-sse-dialect').addEventListener('change', e => {
+    onSseDialectChange(e.target.value);
+  });
+
   ['f-cat', 'f-test-status', 'f-status', 'f-result'].forEach(id =>
     document.getElementById(id).addEventListener('change', applyFiltersAndRender)
   );
@@ -547,8 +625,30 @@ function populateRequestTypeSelect() {
 }
 
 function setRequestTypeVisible(show) {
-  const sel = document.getElementById('f-request-type');
-  if (sel) sel.disabled = !show;
+  const reqSel = document.getElementById('f-request-type');
+  const resSel = document.getElementById('f-response-type');
+  const sseSel = document.getElementById('f-sse-dialect');
+  if (reqSel) reqSel.disabled = !show;
+  if (resSel) resSel.disabled = !show;
+  if (sseSel) sseSel.disabled = !show;
+  // The SSE-dialect row is only relevant for an SSE response.
+  const grp = document.getElementById('sse-dialect-group');
+  if (grp) grp.style.display = (show && currentProfile?.response_body_type === 'sse') ? '' : 'none';
+}
+
+// Fills the response-body-type + SSE-dialect dropdowns from the single-source lists.
+function populateResponseTypeSelects() {
+  const resSel = document.getElementById('f-response-type');
+  if (resSel) {
+    resSel.innerHTML = '';
+    for (const t of RESPONSE_BODY_TYPES) resSel.appendChild(new Option(t.label, t.key));
+    resSel.value = 'json';
+  }
+  const sseSel = document.getElementById('f-sse-dialect');
+  if (sseSel) {
+    sseSel.innerHTML = '';
+    for (const [key, d] of Object.entries(SSE_DIALECTS)) sseSel.appendChild(new Option(d.label, key));
+  }
 }
 
 function setPlaceholder(msg) {
