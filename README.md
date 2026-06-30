@@ -290,7 +290,10 @@ defaults and the Postman/Karate exports. A value present in the file **overrides
   reload — the Try It tab and the next export pick up your edits.
 
 Writing requires the dev server (it exposes `POST /save?path=output/…`, which only ever writes inside
-`output/`). Without it, Save Specs is a no-op and exports fall back to a browser download.
+`output/`). Without it, exports fall back to a browser download, and Save Specs / Save as baseline fall
+back to browser storage (`localStorage` key `apitest.specs.v1`) — so edits survive a reload or swagger
+switch even with the server down. The on-disk `output/{id}/specs.json` stays authoritative: when the dev
+server is up it wins on load, and a successful save clears the cached copy.
 
 ## Adding a new Swagger
 

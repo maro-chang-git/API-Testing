@@ -722,7 +722,7 @@ export async function saveBaseline() {
     notice.style.display = '';
     notice.textContent = ok
       ? `📌 Baseline saved (${_lastResponse.status} · ${_lastResponse.elapsed}ms) for ${_profile.method} ${_profile.path}.`
-      : `📌 Baseline recorded in memory — run devserver.py to persist it to output/.`;
+      : `📌 Baseline saved to browser storage (dev server offline). Start devserver.py and Save Specs to also write output/specs.json.`;
   }
 }
 

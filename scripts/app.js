@@ -472,7 +472,7 @@ async function onSaveSpecs() {
   captureTryItHeader();
   captureTryItBody();
   const saved = await specsStore.saveSpecs();
-  flashButton('btn-save-specs', 'Save Specs', saved ? 'Saved ✓' : 'Dev server off');
+  flashButton('btn-save-specs', 'Save Specs', saved ? 'Saved ✓' : 'Saved locally');
 }
 
 // Briefly swaps a button's label to confirm an action, then restores it.

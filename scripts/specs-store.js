@@ -18,6 +18,7 @@ import { getResponseExample, getRequestBodySchema, buildExampleFromSchema } from
 import { getConfig } from './core/config-loader.js';
 import { getEndpointsByTag } from './core/swagger-loader.js';
 import { getOperation, profileEndpoint } from './core/template-matcher.js';
+import { loadCachedSpecs, saveCachedSpecs, clearCachedSpecs } from './state/specs-cache.js';
 
 const SAVE_ENDPOINT = '/save?path=';
 
@@ -39,18 +40,31 @@ export async function loadOrScaffoldSpecs(entry, spec) {
   try {
     const res = await fetch(`output/${entry.id}/specs.json`, { cache: 'no-store' });
     if (res.ok) {
-      _model = await res.json();
-      // Self-heal a stale base URL: an old file may carry a scheme-only/empty
-      // baseUrl (e.g. "https://") that would otherwise shadow a spec that since
-      // gained a host/servers[]. Re-derive from the spec so it picks it up.
-      if (isBlankBaseUrl(_model?.swagger?.baseUrl)) {
-        (_model.swagger ||= {}).baseUrl = getBaseUrl(spec);
-      }
+      // Disk is authoritative: when the dev server returns the file, it wins
+      // over any localStorage cache (so hand-edits to specs.json are honoured).
+      _model = healBaseUrl(await res.json(), spec);
       return _model;
     }
-  } catch { /* dev server down or file absent — fall through to scaffold */ }
+  } catch { /* dev server down or file absent — fall through to cache/scaffold */ }
+  // Dev server unreachable: restore the un-persisted (offline) model if one was
+  // cached, otherwise scaffold a fresh one from the spec + config.
+  const cached = loadCachedSpecs(entry.id);
+  if (cached) {
+    _model = healBaseUrl(cached, spec);
+    return _model;
+  }
   _model = scaffoldSpecs(entry, spec);
   return _model;
+}
+
+// Self-heal a stale base URL: an old model may carry a scheme-only/empty baseUrl
+// (e.g. "https://") that would otherwise shadow a spec that since gained a
+// host/servers[]. Re-derive from the spec so it picks it up.
+function healBaseUrl(model, spec) {
+  if (isBlankBaseUrl(model?.swagger?.baseUrl)) {
+    (model.swagger ||= {}).baseUrl = getBaseUrl(spec);
+  }
+  return model;
 }
 
 // A base URL is "blank" when it's empty or just a scheme with no host
@@ -326,5 +340,11 @@ export async function saveOrDownload(relPath, filename, content, contentType = '
 export async function saveSpecs() {
   if (!_model || !_entry) return false;
   _model.updatedAt = new Date().toISOString();
-  return saveFile(`output/${_entry.id}/specs.json`, JSON.stringify(_model, null, 2));
+  const ok = await saveFile(`output/${_entry.id}/specs.json`, JSON.stringify(_model, null, 2));
+  // Disk is the durable copy when reachable; otherwise mirror to localStorage so
+  // the edits survive a reload / swagger switch. A successful save clears the
+  // cache, leaving it to hold only un-persisted (offline) models.
+  if (ok) clearCachedSpecs(_entry.id);
+  else saveCachedSpecs(_entry.id, _model);
+  return ok;
 }
