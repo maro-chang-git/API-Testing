@@ -140,7 +140,7 @@ function onEndpointChange(value) {
   if (!operation) return;
 
   // Point `results` at this endpoint's stored map (restores any saved results).
-  currentEndpointKey = endpointKey(document.getElementById('f-swagger').value, method, path);
+  currentEndpointKey = endpointKey(currentSwagger.id, method, path);
   results = resultsStore[currentEndpointKey] ||= {};
 
   currentProfile   = profileEndpoint(path, method, operation, currentSpec);
