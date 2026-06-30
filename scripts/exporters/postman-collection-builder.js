@@ -1,6 +1,6 @@
 import { isCookieAuth } from '../tryit/request-core.js';
 import { getConfig } from '../core/config-loader.js';
-import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectivePathParams, effectiveRequestBody, saveOrDownload } from '../specs-store.js';
+import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectiveHeaderParams, effectivePathParams, effectiveRequestBody, saveOrDownload } from '../specs-store.js';
 import { getTestBody, BODY_KIND } from './body-builder.js';
 import { expectedStatuses } from '../core/template-matcher.js';
 import { CATEGORY_ORDER, CATEGORY_LABEL } from '../core/case-order.js';
@@ -39,11 +39,11 @@ export async function exportPostman(profile, operation, spec, testCases, swagger
     .filter(p => p.in === 'query')
     .map(p => ({ key: p.name, value: '', description: p.description ?? '', disabled: true }));
 
-  // Spec `in: header` params (e.g. anthropic-version) — sent on every request,
-  // seeded from each param's schema default/example.
-  const headerParams = (operation.parameters ?? [])
-    .filter(p => p.in === 'header')
-    .map(p => ({ key: p.name, value: String(p.schema?.default ?? p.schema?.example ?? '') }));
+  // `in: header` params (e.g. anthropic-version) — sent on every request. Values
+  // come from the persisted Try It edits when present, else each param's schema
+  // default/example (effectiveHeaderParams).
+  const headerParams = Object.entries(effectiveHeaderParams(method, profile.path, operation))
+    .map(([key, value]) => ({ key, value }));
 
   const pathParams = pathParamNames(profile.path);
 
@@ -334,21 +334,36 @@ function buildHeaders(tc, profile, hasBody, headerParams = []) {
 
 function resolveAuthHeader(tc, profile) {
   const auth         = effectiveAuth();
-  const cookieAuth   = isCookieAuth(profile.auth_type);
+  // Cookie auth comes from the persisted effective selection (auth.in / auth.type),
+  // not just the spec's scheme name — a spec that declares no scheme has
+  // auth_type 'none', so deciding solely on isCookieAuth(profile.auth_type) would
+  // export a Cookie selection as Bearer. Spec name is kept as a fallback.
+  const cookieAuth   = auth.in === 'cookie' || isCookieAuth(auth.type) || isCookieAuth(profile.auth_type);
   const apiKeyHeader = auth.kind === 'apiKey' && auth.in === 'header';
   const invalid      = auth.invalidTokenValue;
 
+  // A persisted full `name=value` cookie is sent verbatim (Cookie: {{token}});
+  // a bare value is prefixed with the cookie name. The name is reused for the
+  // invalid/expired auth-test credentials (whose values are always bare).
+  const fullCookie = cookieAuth && String(auth.token || '').includes('=');
+  const cookieName = fullCookie ? String(auth.token).split('=')[0] : 'session';
+
   // Header key + value-wrapper for the active auth style: a cookie, a raw apiKey
   // header (e.g. x-api-key — no Bearer prefix), or a Bearer Authorization header.
-  const key  = cookieAuth ? 'Cookie' : apiKeyHeader ? (auth.name || 'X-API-Key') : 'Authorization';
-  const wrap = cookieAuth ? v => `session=${v}` : apiKeyHeader ? v => `${v}` : v => `Bearer ${v}`;
+  const key       = cookieAuth ? 'Cookie' : apiKeyHeader ? (auth.name || 'X-API-Key') : 'Authorization';
+  const wrapValid = cookieAuth ? (fullCookie ? v => `${v}` : v => `${cookieName}=${v}`)
+                  : apiKeyHeader ? v => `${v}`
+                  : v => `Bearer ${v}`;
+  const wrapCred  = cookieAuth ? v => `${cookieName}=${v}`
+                  : apiKeyHeader ? v => `${v}`
+                  : v => `Bearer ${v}`;
 
   if (tc.category === 'auth') {
-    if (tc.auth_status === 'invalid')  return { key, value: wrap(invalid) };
-    if (tc.auth_status === 'expired')  return { key, value: wrap('{{expired_token}}') };
+    if (tc.auth_status === 'invalid')  return { key, value: wrapCred(invalid) };
+    if (tc.auth_status === 'expired')  return { key, value: wrapCred('{{expired_token}}') };
     return null; // missing → no header
   }
-  if (profile.auth_required) return { key, value: wrap('{{token}}') };
+  if (profile.auth_required) return { key, value: wrapValid('{{token}}') };
   return null;
 }
 

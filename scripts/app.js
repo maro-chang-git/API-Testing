@@ -1,6 +1,6 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './core/swagger-loader.js';
 import { profileEndpoint, matchTemplates, getOperation, authEnforced } from './core/template-matcher.js';
-import { initRequestBuilder, resetRequestBuilder, runTestCase, setOnResponse, captureTryItAuth, captureTryItBody } from './tryit/request-ui.js';
+import { initRequestBuilder, resetRequestBuilder, runTestCase, setOnResponse, captureTryItAuth, captureTryItBody, captureTryItBaseUrl, captureTryItHeader } from './tryit/request-ui.js';
 import { exportPostman } from './exporters/postman-collection-builder.js';
 import { exportKarate } from './exporters/karate-feature-builder.js';
 import { loadConfig } from './core/config-loader.js';
@@ -376,7 +376,7 @@ function bindFilters() {
   document.getElementById('tbody').addEventListener('click', e => {
     const row = e.target.closest('.tc-main-row');
     if (!row) return;
-    if (e.target.closest('.run-tc-btn')) {
+  if (e.target.closest('.run-tc-btn')) {
       runTc(row.dataset.tcId);
       return;
     }
@@ -461,8 +461,10 @@ async function onExportKarate() {
 // Persists the per-swagger specs file (output/{id}/specs.json).
 async function onSaveSpecs() {
   if (!currentSwagger) return;
-  // Fold the token + request body entered in Try It into the specs before saving.
+  // Fold the base URL + token + headers + request body entered in Try It into the specs before saving.
+  captureTryItBaseUrl();
   captureTryItAuth();
+  captureTryItHeader();
   captureTryItBody();
   const saved = await specsStore.saveSpecs();
   flashButton('btn-save-specs', 'Save Specs', saved ? 'Saved ✓' : 'Dev server off');

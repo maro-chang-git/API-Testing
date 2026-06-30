@@ -1,7 +1,7 @@
 import { isCookieAuth } from '../tryit/request-core.js';
 import { CATEGORY_ORDER, CATEGORY_LABEL } from '../core/case-order.js';
 import { getConfig } from '../core/config-loader.js';
-import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectivePathParams, effectiveRequestBody, saveOrDownload } from '../specs-store.js';
+import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectiveHeaderParams, effectivePathParams, effectiveRequestBody, saveOrDownload } from '../specs-store.js';
 import { getTestBody, BODY_KIND } from './body-builder.js';
 import { expectedStatuses } from '../core/template-matcher.js';
 import { is2xx, is4xx } from '../core/status-utils.js';
@@ -19,23 +19,37 @@ import { normalizeAssertion, pathParamNames, methodHasBody, filenameSlug } from 
 export async function exportKarate(profile, operation, spec, testCases, swaggerId) {
   const method     = profile.method;
   const hasBody    = methodHasBody(method);
-  const cookieAuth = isCookieAuth(profile.auth_type);
 
   // Auth style → header name + a wrapper turning a karate-config var name into the
   // header value expression. Cookie, raw apiKey header (e.g. x-api-key, no Bearer
   // prefix), or Bearer Authorization. `expiredVar` names the config var to use.
   const auth           = effectiveAuth();
+  // Cookie auth comes from the persisted effective selection (auth.in / auth.type),
+  // not just the spec's scheme name — a scheme-less spec has auth_type 'none', so
+  // deciding on isCookieAuth(profile.auth_type) alone would emit Bearer. Spec name
+  // is kept as a fallback.
+  const cookieAuth     = auth.in === 'cookie' || isCookieAuth(auth.type) || isCookieAuth(profile.auth_type);
   const apiKeyHeader   = auth.kind === 'apiKey' && auth.in === 'header';
   const authHeaderName = cookieAuth ? 'Cookie' : apiKeyHeader ? (auth.name || 'X-API-Key') : 'Authorization';
-  const authWrap       = cookieAuth ? (v => `'session=' + ${v}`) : apiKeyHeader ? (v => v) : (v => `'Bearer ' + ${v}`);
+
+  // A persisted full `name=value` cookie is sent verbatim — the config var holds
+  // the whole string, so the valid clause is just the bare var (Cookie: sessionToken).
+  // A bare value is prefixed with the cookie name. The name carries across the
+  // invalid/expired credentials (whose config values are always bare).
+  const fullCookie     = cookieAuth && String(auth.token || '').includes('=');
+  const cookieName     = fullCookie ? String(auth.token).split('=')[0] : 'session';
+  const authWrap       = cookieAuth ? (fullCookie ? (v => v) : (v => `'${cookieName}=' + ${v}`))
+                       : apiKeyHeader ? (v => v) : (v => `'Bearer ' + ${v}`);
+  const authWrapCred   = cookieAuth ? (v => `'${cookieName}=' + ${v}`)
+                       : apiKeyHeader ? (v => v) : (v => `'Bearer ' + ${v}`);
   const validVar       = cookieAuth ? 'sessionToken'   : 'token';
   const expiredVar     = cookieAuth ? 'expiredSession' : 'expiredToken';
 
-  // Spec `in: header` params (e.g. anthropic-version) → Karate map clauses sent on
-  // every request, seeded from each param's schema default/example.
-  const headerParamClauses = (operation.parameters ?? [])
-    .filter(p => p.in === 'header')
-    .map(p => `${mapKey(p.name)}: ${karateValueLiteral(String(p.schema?.default ?? p.schema?.example ?? ''))}`);
+  // `in: header` params (e.g. anthropic-version) → Karate map clauses sent on
+  // every request. Values come from the persisted Try It edits when present, else
+  // each param's schema default/example (effectiveHeaderParams).
+  const headerParamClauses = Object.entries(effectiveHeaderParams(method, profile.path, operation))
+    .map(([name, value]) => `${mapKey(name)}: ${karateValueLiteral(String(value))}`);
 
   // Valid-body example: the specs request body (user-edited) or the schema example.
   const exampleObj    = hasBody ? effectiveRequestBody(method, profile.path, operation, spec) : null;
@@ -97,7 +111,7 @@ export async function exportKarate(profile, operation, spec, testCases, swaggerI
     // The auth cases differ only by credential + expected status, so they fold into
     // a single data-driven Scenario Outline instead of one near-identical copy each.
     if (cat === 'auth') {
-      buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, authWrap, expiredVar, headerParamClauses }, lines);
+      buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, authWrap: authWrapCred, expiredVar, headerParamClauses }, lines);
       lines.push('');
       return;
     }

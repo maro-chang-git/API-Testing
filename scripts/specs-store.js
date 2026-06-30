@@ -10,7 +10,7 @@
 //   {
 //     swaggerId, title, file, generatedAt, updatedAt,
 //     swagger:   { baseUrl, auth: { type, in, token, expiredToken, invalidTokenValue }, headers: { accept, contentType } },
-//     endpoints: { "GET /path": { method, path, summary, authRequired, pathParams, responses: { "200", error }, baseline? } }
+//     endpoints: { "GET /path": { method, path, summary, authRequired, pathParams, headerParams?, responses: { "200", error }, baseline? } }
 //   }
 
 import { getBaseUrl, isCookieAuth } from './tryit/request-core.js';
@@ -40,11 +40,23 @@ export async function loadOrScaffoldSpecs(entry, spec) {
     const res = await fetch(`output/${entry.id}/specs.json`, { cache: 'no-store' });
     if (res.ok) {
       _model = await res.json();
+      // Self-heal a stale base URL: an old file may carry a scheme-only/empty
+      // baseUrl (e.g. "https://") that would otherwise shadow a spec that since
+      // gained a host/servers[]. Re-derive from the spec so it picks it up.
+      if (isBlankBaseUrl(_model?.swagger?.baseUrl)) {
+        (_model.swagger ||= {}).baseUrl = getBaseUrl(spec);
+      }
       return _model;
     }
   } catch { /* dev server down or file absent — fall through to scaffold */ }
   _model = scaffoldSpecs(entry, spec);
   return _model;
+}
+
+// A base URL is "blank" when it's empty or just a scheme with no host
+// (e.g. "https://"), the value getBaseUrl() returns for a host-less spec.
+function isBlankBaseUrl(url) {
+  return !url || /^https?:\/\/$/.test(String(url).trim());
 }
 
 function scaffoldSpecs(entry, spec) {
@@ -194,6 +206,21 @@ export function effectiveRequestBody(method, path, operation, spec) {
   return schema ? buildExampleFromSchema(schema, spec) : null;
 }
 
+// `in: header` parameter (and custom header) values for an endpoint: the specs
+// value (user-edited in Try It) when present, otherwise the spec defaults (each
+// `in: header` param's schema default/example). Persisted values win as a whole
+// — they were captured from the full editable row set — so removals/edits stick.
+// Returns an ordered name→value map.
+export function effectiveHeaderParams(method, path, operation) {
+  const persisted = getEndpointSpecs(method, path)?.headerParams;
+  if (persisted && typeof persisted === 'object') return { ...persisted };
+  const out = {};
+  for (const p of (operation?.parameters ?? []).filter(p => p.in === 'header')) {
+    out[p.name] = String(p.schema?.default ?? p.schema?.example ?? '');
+  }
+  return out;
+}
+
 // Path-param defaults for an endpoint: the specs value first, then config, then ''.
 export function effectivePathParams(method, path) {
   const cfg = getConfig();
@@ -206,6 +233,14 @@ export function effectivePathParams(method, path) {
 }
 
 // ── Mutations ────────────────────────────────────────────────────────────────
+
+// Stores the base URL captured from the Try It tab into the swagger specs.
+export function setBaseUrl(url) {
+  if (!_model) return;
+  (_model.swagger ||= {});
+  _model.swagger.baseUrl = url;
+  _model.updatedAt = new Date().toISOString();
+}
 
 // Stores the valid auth token captured from the Try It tab into the swagger specs.
 export function setAuthToken(token) {
@@ -222,6 +257,17 @@ export function setRequestBody(method, path, body) {
   const key = specKey(method, path);
   const e = (_model.endpoints[key] ||= { method: String(method).toUpperCase(), path });
   e.requestBody = body;
+  _model.updatedAt = new Date().toISOString();
+}
+
+// Stores the `in: header` parameter (and custom header) values captured from the
+// Try It tab into the endpoint specs, so Save Specs persists them and both
+// exporters emit the edited values. Keyed by header name → value.
+export function setHeaderParams(method, path, headerParams) {
+  if (!_model) return;
+  const key = specKey(method, path);
+  const e = (_model.endpoints[key] ||= { method: String(method).toUpperCase(), path });
+  e.headerParams = headerParams;
   _model.updatedAt = new Date().toISOString();
 }
 

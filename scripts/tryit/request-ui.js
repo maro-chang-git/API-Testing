@@ -300,23 +300,25 @@ function renderBodySection() {
 // getResponseExample) and response-schema validation now live in
 // tryit/schema-validator.js — DOM-free and unit-tested.
 
-// Renders the operation's `in: header` parameters as editable, pre-filled header
-// rows (seeded from each param's schema default/example), so spec-required
-// headers like `anthropic-version` are actually sent. They're tagged
-// data-header-param (editable + removable, unlike the readonly Accept/Content-Type
-// defaults) and re-rendered on every endpoint switch.
+// Renders the endpoint's `in: header` parameters as editable, pre-filled header
+// rows, so spec-required headers like `anthropic-version` are actually sent.
+// Values come from specsStore.effectiveHeaderParams — the persisted Try It edits
+// when present, otherwise each param's schema default/example (which also surfaces
+// any custom headers the user saved). They're tagged data-header-param (editable +
+// removable, unlike the readonly Accept/Content-Type defaults) and re-rendered on
+// every endpoint switch.
 function renderHeaderParams() {
   const list = document.getElementById('rb-headers-list');
   list.querySelectorAll('[data-header-param]').forEach(el => el.remove());
 
-  const params = (_operation?.parameters ?? []).filter(p => p.in === 'header');
-  if (!params.length) return;
+  const params = specsStore.effectiveHeaderParams(_profile.method, _profile.path, _operation);
+  const names = Object.keys(params);
+  if (!names.length) return;
 
   // Place them after the default headers (the first non-default row, or the end).
   const anchor = [...list.children].find(el => !el.dataset.defaultHeader) ?? null;
-  for (const p of params) {
-    const seed = p.schema?.default ?? p.schema?.example ?? '';
-    const row = makeHeaderRow(p.name, String(seed), false);
+  for (const name of names) {
+    const row = makeHeaderRow(name, String(params[name]), false);
     row.dataset.headerParam = '1';
     list.insertBefore(row, anchor);
   }
@@ -654,6 +656,34 @@ export function captureTryItAuth() {
   if (!type || type === 'none' || !value) return;
   const token = type === 'cookie' ? value.replace(/^session=/, '') : value;
   specsStore.setAuthToken(token);
+}
+
+// Captures the editable header rows currently in the Try It tab into the endpoint
+// specs (the `in: header` param rows + any custom rows the user added), skipping
+// the readonly Accept/Content-Type defaults and the auto-auth row (auth is captured
+// separately). Called on Save Specs so the edited headers persist and both
+// exporters emit them.
+export function captureTryItHeader() {
+  if (!_profile) return;
+  const headerParams = {};
+  document.querySelectorAll('#rb-headers-list .rb-header-row').forEach(row => {
+    if (row.dataset.defaultHeader || row.dataset.autoAuth) return;
+    const key = row.querySelector('.rb-header-key')?.value.trim();
+    const val = row.querySelector('.rb-header-val')?.value.trim() ?? '';
+    if (key) headerParams[key] = val;
+  });
+  specsStore.setHeaderParams(_profile.method, _profile.path, headerParams);
+}
+
+// Captures the base URL currently entered in the Try It tab into the swagger
+// specs, stripping the local dev-server proxy prefix so the real target host is
+// persisted, not the .../proxy?url= wrapper. Called on Save Specs.
+export function captureTryItBaseUrl() {
+  const raw = document.getElementById('rb-base-url')?.value?.trim();
+  if (!raw) return;
+  const proxyPrefix = `${location.origin}/proxy?url=`;
+  const url = raw.startsWith(proxyPrefix) ? raw.slice(proxyPrefix.length) : raw;
+  if (url) specsStore.setBaseUrl(url);
 }
 
 // Captures the request body currently in the Try It editor into the endpoint
