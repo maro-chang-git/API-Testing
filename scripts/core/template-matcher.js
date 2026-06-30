@@ -43,18 +43,7 @@ export function profileEndpoint(path, method, operation, spec) {
     has_query_params: hasQueryParams,
     has_body: hasBody,
     endpoint_type: endpointType,
-    response_is_stream: responseIsEventStream(operation),
   };
-}
-
-// True when the operation declares a Server-Sent-Events (text/event-stream)
-// success (2xx) response. Drives stream-aware assertion generation in the
-// exporters and is carried onto each matched case.
-function responseIsEventStream(operation) {
-  const responses = operation.responses || {};
-  return Object.entries(responses).some(([code, resp]) =>
-    /^2\d\d$/.test(code) &&
-    resp?.content && Object.keys(resp.content).some(ct => /event-stream/i.test(ct)));
 }
 
 /**
@@ -69,10 +58,16 @@ function responseIsEventStream(operation) {
  * can no longer be found.
  */
 export function matchTemplates(profile, templates) {
+  // The manual request type gates which templates apply (e.g. JSON-body cases
+  // don't apply to a multipart upload). Default to 'regular' so callers that
+  // don't stamp a request type (and ungated templates) behave as before.
+  const requestType = profile.request_type ?? 'regular';
+
   const matched = templates.filter(tpl => {
     const a = tpl.applies_to;
 
     if (!a.methods.includes(profile.method)) return false;
+    if (a.request_types   && !a.request_types.includes(requestType)) return false;
     if (a.auth_required   && !profile.auth_required)    return false;
     if (a.endpoint_type   && a.endpoint_type !== profile.endpoint_type) return false;
     if (a.has_path_params && !profile.has_path_params)  return false;
@@ -94,6 +89,7 @@ export function matchTemplates(profile, templates) {
     tag: tpl.tag,
     purpose: tpl.purpose,
     expected_status: tpl.expected_status,
+    request_type: profile.request_type,
     response_is_stream: profile.response_is_stream,
     notes: tpl.notes,
   }));

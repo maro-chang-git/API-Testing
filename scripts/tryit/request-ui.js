@@ -465,7 +465,15 @@ export async function sendRequest() {
 
     const rawText     = await res.text();
     const contentType = res.headers.get('content-type') || '';
-    const stream      = isEventStream(contentType, rawText) ? parseEventStream(rawText) : null;
+    // Route response handling by the endpoint's manual request type. A 'stream'
+    // selection forces SSE parsing; everything else still sniffs the body so a
+    // mislabeled stream is caught (belt-and-suspenders). Not-yet-implemented
+    // types (upload / download / …) fall back to this regular handling for now.
+    // TODO: add dedicated upload (FormData) / download (blob) handlers here.
+    const forceStream = _profile.request_type === 'stream';
+    const stream      = (forceStream || isEventStream(contentType, rawText))
+      ? parseEventStream(rawText)
+      : null;
 
     let prettyBody = rawText;
     if (!stream) {

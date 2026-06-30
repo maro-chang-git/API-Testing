@@ -132,7 +132,7 @@ When an endpoint is selected, `core/template-matcher.js` builds a profile from t
 | `has_body` | Operation has an `in: body` parameter (Swagger 2) or a `requestBody` (OpenAPI 3) |
 | `auth_required` | The operation **or the spec root** declares a non-empty `security` requirement. A `{}` entry (anonymous allowed) or an operation-level `security: []` (auth disabled) means **not** required. |
 | `auth_type` | Name of the first security scheme (e.g. `OAuth2`, `ApiKeyAuth`, `cookieAuth`) |
-| `response_is_stream` | True when a 2xx response declares `text/event-stream` content — drives stream-aware export assertions |
+| `request_type` / `response_is_stream` | The endpoint's **manual** request type (toolbar dropdown, persisted per-endpoint in `specs.json`, default `regular`; no spec auto-detection). `stream` sets `response_is_stream` and drives SSE-aware Try It + export handling; not-yet-implemented types (`upload`, `download`, …) route to a TODO seam that falls back to the regular handler |
 
 Each template declares an `applies_to` rule. A template is matched only when **all** its conditions satisfy the endpoint profile.
 

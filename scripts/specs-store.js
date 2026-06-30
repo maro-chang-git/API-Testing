@@ -10,7 +10,7 @@
 //   {
 //     swaggerId, title, file, generatedAt, updatedAt,
 //     swagger:   { baseUrl, auth: { type, in, token, expiredToken, invalidTokenValue }, headers: { accept, contentType } },
-//     endpoints: { "GET /path": { method, path, summary, authRequired, pathParams, headerParams?, responses: { "200", error }, baseline? } }
+//     endpoints: { "GET /path": { method, path, summary, authRequired, requestType, pathParams, headerParams?, responses: { "200", error }, baseline? } }
 //   }
 
 import { getBaseUrl, isCookieAuth } from './tryit/request-core.js';
@@ -18,6 +18,7 @@ import { getResponseExample, getRequestBodySchema, buildExampleFromSchema } from
 import { getConfig } from './core/config-loader.js';
 import { getEndpointsByTag } from './core/swagger-loader.js';
 import { getOperation, profileEndpoint } from './core/template-matcher.js';
+import { DEFAULT_REQUEST_TYPE } from './core/request-types.js';
 import { loadCachedSpecs, saveCachedSpecs, clearCachedSpecs } from './state/specs-cache.js';
 
 const SAVE_ENDPOINT = '/save?path=';
@@ -89,6 +90,7 @@ function scaffoldSpecs(entry, spec) {
         path,
         summary: op.summary || '',
         authRequired: profile.auth_required,
+        requestType: DEFAULT_REQUEST_TYPE,
         pathParams: scaffoldPathParams(path, cfg),
         ...(hasBody ? { requestBody: requestBodyExample(op, spec) } : {}),
         responses: {
@@ -202,6 +204,14 @@ export function effectiveAuthRequired(method, path, fallback) {
   return getEndpointSpecs(method, path)?.authRequired ?? fallback;
 }
 
+// Effective request type for an endpoint: the persisted manual selection when
+// present, otherwise the default ('regular'). Drives the handler seam in the Try
+// It tab and both exporters (e.g. 'stream' → SSE assertions). There is no spec
+// auto-detection — the user picks the type explicitly.
+export function effectiveRequestType(method, path, fallback = DEFAULT_REQUEST_TYPE) {
+  return getEndpointSpecs(method, path)?.requestType ?? fallback;
+}
+
 export function effectiveHeaders() {
   const cfg = getConfig();
   const h = _model?.swagger?.headers;
@@ -293,6 +303,17 @@ export function setAuthRequired(method, path, value) {
   const key = specKey(method, path);
   const e = (_model.endpoints[key] ||= { method: String(method).toUpperCase(), path });
   e.authRequired = value;
+  _model.updatedAt = new Date().toISOString();
+}
+
+// Sets the manual request type for an endpoint (regular | stream | upload | …).
+// Persisted to specs.json (immediately by the toolbar dropdown handler) and
+// loaded back with the rest of the specs on open.
+export function setRequestType(method, path, value) {
+  if (!_model) return;
+  const key = specKey(method, path);
+  const e = (_model.endpoints[key] ||= { method: String(method).toUpperCase(), path });
+  e.requestType = value;
   _model.updatedAt = new Date().toISOString();
 }
 

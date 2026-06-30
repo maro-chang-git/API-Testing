@@ -7,6 +7,7 @@ import { loadConfig } from './core/config-loader.js';
 import * as specsStore from './specs-store.js';
 import { generateTestCasesFromResponse } from './generate/response-test-generator.js';
 import { compareTestCases } from './core/case-order.js';
+import { REQUEST_TYPES, DEFAULT_REQUEST_TYPE, requestTypeOptionLabel } from './core/request-types.js';
 import { expandMethodNotAllowed } from './core/case-expander.js';
 import { filterAndSort } from './ui/filter-sort.js';
 import { esc } from './ui/dom.js';
@@ -128,6 +129,7 @@ function onEndpointChange(value) {
     currentProfile = null;
     matchedCases = [];
     setExportVisible(false);
+    setRequestTypeVisible(false);
     renderTable([]);
     renderSummary([]);
     resetRequestBuilder();
@@ -142,14 +144,28 @@ function onEndpointChange(value) {
   // Point `results` at this endpoint's stored map (restores any saved results).
   currentEndpointKey = endpointKey(currentSwagger.id, method, path);
   results = resultsStore[currentEndpointKey] ||= {};
+  currentOperation = operation;
 
-  currentProfile   = profileEndpoint(path, method, operation, currentSpec);
+  // Reflect the saved request type (loaded with the rest of the specs) into the
+  // toolbar dropdown, then derive cases for it.
+  syncRequestTypeSelect(method, path);
+  deriveAndRenderEndpoint(method, path, operation);
+}
+
+// Profiles the endpoint (applying the persisted auth-required + request-type
+// overrides), matches templates, expands the 405 cases, and renders the table +
+// Try It tab. Re-runnable so the request-type dropdown can refresh in place.
+function deriveAndRenderEndpoint(method, path, operation) {
+  currentProfile = profileEndpoint(path, method, operation, currentSpec);
   // Honor a per-endpoint auth-required override from specs.json (set by Try It
   // auth discovery or hand-edited) — the spec often marks auth as optional when
   // the endpoint really enforces it.
   currentProfile.auth_required =
     specsStore.effectiveAuthRequired(method, path, currentProfile.auth_required);
-  currentOperation = operation;
+  // Request type is a manual, per-endpoint selection (no spec auto-detection); it
+  // drives the handler seam in the exporters + Try It (e.g. 'stream' → SSE).
+  currentProfile.request_type       = specsStore.effectiveRequestType(method, path);
+  currentProfile.response_is_stream = currentProfile.request_type === 'stream';
   matchedCases     = matchTemplates(currentProfile, templates);
 
   // Expand TPL-NEG-009 into one case per disallowed method (every standard HTTP
@@ -165,6 +181,25 @@ function onEndpointChange(value) {
   setExportVisible(true);
   applyFiltersAndRender();
   initRequestBuilder(currentProfile, operation, currentSpec, currentSwagger.id);
+}
+
+// Persists the picked request type to specs.json immediately and re-derives the
+// cases + Try It so the new handler routing takes effect at once.
+async function onRequestTypeChange(value) {
+  if (!currentProfile) return;
+  const { method, path } = currentProfile;
+  specsStore.setRequestType(method, path, value);
+  deriveAndRenderEndpoint(method, path, currentOperation);
+  const saved = await specsStore.saveSpecs();
+  flashButton('btn-save-specs', 'Save Specs', saved ? 'Type saved ✓' : 'Saved locally');
+}
+
+// Mirrors the saved/effective request type into the toolbar dropdown and enables it.
+function syncRequestTypeSelect(method, path) {
+  const sel = document.getElementById('f-request-type');
+  if (!sel) return;
+  sel.value = specsStore.effectiveRequestType(method, path);
+  setRequestTypeVisible(true);
 }
 
 function runTc(tcId) {
@@ -347,6 +382,13 @@ function bindFilters() {
     onEndpointChange(e.target.value);
   });
 
+  // Request-type dropdown: populate the (mostly not-yet-implemented) options once,
+  // then persist + re-derive on each manual change.
+  populateRequestTypeSelect();
+  document.getElementById('f-request-type').addEventListener('change', e => {
+    onRequestTypeChange(e.target.value);
+  });
+
   ['f-cat', 'f-test-status', 'f-status', 'f-result'].forEach(id =>
     document.getElementById(id).addEventListener('change', applyFiltersAndRender)
   );
@@ -490,6 +532,23 @@ function setExportVisible(show) {
   document.getElementById('btn-postman').style.display = show ? '' : 'none';
   document.getElementById('btn-karate').style.display  = show ? '' : 'none';
   document.getElementById('rb-gen-section').style.display = show ? '' : 'none';
+}
+
+// Fills the request-type dropdown from the single-source REQUEST_TYPES list,
+// flagging the not-yet-implemented types in their label.
+function populateRequestTypeSelect() {
+  const sel = document.getElementById('f-request-type');
+  if (!sel) return;
+  sel.innerHTML = '';
+  for (const type of REQUEST_TYPES) {
+    sel.appendChild(new Option(requestTypeOptionLabel(type), type.key));
+  }
+  sel.value = DEFAULT_REQUEST_TYPE;
+}
+
+function setRequestTypeVisible(show) {
+  const sel = document.getElementById('f-request-type');
+  if (sel) sel.disabled = !show;
 }
 
 function setPlaceholder(msg) {

@@ -238,7 +238,8 @@ function templateBlocks(tc, statuses) {
   const primary = statuses[0];
 
   if (is2xx(primary)) {
-    if (tc.response_is_stream) {
+    // Route the 2xx body assertions by the endpoint's manual request type.
+    if (tc.request_type === 'stream') {
       // text/event-stream responses aren't JSON — assert the stream shape instead.
       out.push([
         `pm.test('Streaming (text/event-stream) response', function () {`,
@@ -247,6 +248,13 @@ function templateBlocks(tc, statuses) {
         `});`,
       ]);
     } else {
+      // Not-yet-implemented types (upload / download / graphql / …) fall back to
+      // the regular JSON-body assertions until a dedicated handler is added.
+      if (tc.request_type && tc.request_type !== 'regular') {
+        out.push([
+          `// TODO: ${tc.request_type} handler not yet included — using regular JSON assertions`,
+        ]);
+      }
       out.push([
         `pm.test('Response body is valid JSON', function () {`,
         `  pm.response.to.have.jsonBody();`,
