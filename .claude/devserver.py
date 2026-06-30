@@ -103,6 +103,11 @@ PROXY_OPENER = urllib.request.build_opener(
 # Writes are confined to this directory — see save() for the containment check.
 OUTPUT_ROOT = os.path.realpath(os.path.join(os.getcwd(), 'output'))
 
+# The swagger manifest (swaggers/index.json) is regenerated from the *.json specs
+# at startup — see generate_swaggers_index().
+SWAGGERS_DIR = os.path.realpath(os.path.join(os.getcwd(), 'swaggers'))
+SWAGGERS_INDEX = os.path.join(SWAGGERS_DIR, 'index.json')
+
 # Request headers the proxy must not forward: hop-by-hop / connection-specific
 # ones, plus those it sets itself (Host, Content-Length). `origin`/`referer` are
 # dropped too so the target sees a server-side client, not a browser — some APIs
@@ -261,10 +266,90 @@ class DevHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(payload)
 
 
+def _derive_title(file):
+    """A spec's display title: its info.title, falling back to the filename stem
+    (used when info.title is absent/blank or the file can't be parsed)."""
+    stem = os.path.splitext(file)[0]
+    try:
+        with open(os.path.join(SWAGGERS_DIR, file), encoding='utf-8') as f:
+            spec = json.load(f)
+        title = (spec.get('info') or {}).get('title')
+        return title if isinstance(title, str) and title.strip() else stem
+    except (json.JSONDecodeError, OSError):
+        return stem
+
+
+def generate_swaggers_index():
+    """Refresh swaggers/index.json from the *.json specs in swaggers/.
+
+    The manifest (consumed by swagger-loader.loadManifest) stays on disk so the
+    viewer still loads it as a static file under Vite alone — we just regenerate it
+    here instead of hand-maintaining it. Each spec becomes an entry
+    { id: <stem>, file: <name>, title: <info.title or stem> }.
+
+    Existing entries win: their curated id/title and ordering are preserved (so a
+    hand-added annotation like "(OpenAPI 3)" isn't clobbered by the bare info.title).
+    Newly-dropped specs are appended (sorted); entries whose file no longer exists
+    are pruned. The write is skipped when the result is byte-identical, so an
+    unchanged swaggers/ dir produces no diff.
+    """
+    if not os.path.isdir(SWAGGERS_DIR):
+        return
+
+    existing = []
+    try:
+        with open(SWAGGERS_INDEX, encoding='utf-8') as f:
+            existing = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        existing = []
+    if not isinstance(existing, list):
+        existing = []
+
+    present = sorted(f for f in os.listdir(SWAGGERS_DIR)
+                     if f.endswith('.json') and f != 'index.json')
+    present_set = set(present)
+
+    manifest, seen = [], set()
+    # 1) Keep existing entries (curated id/title + order) whose file still exists.
+    for entry in existing:
+        if not isinstance(entry, dict):
+            continue
+        file = entry.get('file')
+        if file in present_set and file not in seen:
+            manifest.append({'id': entry.get('id') or os.path.splitext(file)[0],
+                             'file': file,
+                             'title': entry.get('title') or _derive_title(file)})
+            seen.add(file)
+    # 2) Append specs that aren't in the manifest yet.
+    for file in present:
+        if file in seen:
+            continue
+        manifest.append({'id': os.path.splitext(file)[0],
+                         'file': file,
+                         'title': _derive_title(file)})
+        seen.add(file)
+
+    new_text = json.dumps(manifest, indent=2, ensure_ascii=False) + '\n'
+    # newline='' on both read and write disables newline translation, so the file
+    # is written with LF (not Windows CRLF) and the idempotency check compares exact
+    # bytes — an unchanged swaggers/ dir then never rewrites the file.
+    try:
+        with open(SWAGGERS_INDEX, encoding='utf-8', newline='') as f:
+            if f.read() == new_text:
+                print(f'swaggers/index.json up to date ({len(manifest)} specs)')
+                return
+    except (FileNotFoundError, OSError):
+        pass
+    with open(SWAGGERS_INDEX, 'w', encoding='utf-8', newline='') as f:
+        f.write(new_text)
+    print(f'swaggers/index.json regenerated ({len(manifest)} specs)')
+
+
 port = int(os.environ.get('PORT', '8000'))
 # Threaded so the browser's parallel module requests don't serialize/stall.
 # Bind loopback only — Vite (same host) is the sole intended client; this keeps the
 # /save writer and /proxy forwarder off the LAN.
+generate_swaggers_index()
 httpd = http.server.ThreadingHTTPServer(('127.0.0.1', port), DevHandler)
 print(f'devserver listening on http://127.0.0.1:{port} (loopback only)')
 httpd.serve_forever()
