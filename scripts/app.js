@@ -44,11 +44,16 @@ const persistResults = () => saveResultsStore(resultsStore);
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
 async function init() {
+  // loadConfig() resolves to nothing — it populates config-loader's module state
+  // (read app-wide via getConfig()). Kick it off alongside the data fetches so it
+  // still loads concurrently, but await it explicitly instead of destructuring and
+  // discarding a Promise.all slot that hides the real side-effect dependency.
+  const configReady = loadConfig();
   const [manifestData, tplData] = await Promise.all([
     loadManifest(),
     fetch('data/templates.json').then(r => r.json()),
-    loadConfig(),
   ]);
+  await configReady;
 
   manifest  = manifestData;
   templates = tplData.templates;
