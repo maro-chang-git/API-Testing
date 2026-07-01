@@ -12,6 +12,16 @@
  */
 import { expectedStatuses } from '../core/template-matcher.js';
 
+// Recursively replace every string value in an object/array tree.
+function deepMapStrings(val, fn) {
+  if (typeof val === 'string') return fn(val);
+  if (Array.isArray(val)) return val.map(item => deepMapStrings(item, fn));
+  if (val !== null && typeof val === 'object') {
+    return Object.fromEntries(Object.entries(val).map(([k, v]) => [k, deepMapStrings(v, fn)]));
+  }
+  return val;
+}
+
 export const BODY_KIND = Object.freeze({
   VALID:    'valid',
   EMPTY:    'empty',
@@ -31,6 +41,25 @@ export function getTestBody(tc, exampleObj) {
   const primaryStatus = expectedStatuses(tc.expected_status)[0];
   const is2xx = primaryStatus >= 200 && primaryStatus < 300;
 
+  // STR-004 and STR-005 have a 2xx primary status but still require a body
+  // mutation — handle them before the is2xx early-return below.
+  if (tc.template_id === 'TPL-STR-004') {
+    // Non-streaming fallback: keep valid body but set stream: false.
+    if (exampleObj && typeof exampleObj === 'object' && !Array.isArray(exampleObj)) {
+      return { kind: BODY_KIND.OBJECT, data: { ...exampleObj, stream: false } };
+    }
+    return { kind: BODY_KIND.VALID };
+  }
+  if (tc.template_id === 'TPL-STR-005') {
+    // Oversized input: replace every string in the tree (including nested message
+    // content) with 50 000 characters to approach the API's context limit.
+    if (exampleObj && typeof exampleObj === 'object' && !Array.isArray(exampleObj)) {
+      const huge = 'x'.repeat(50000);
+      return { kind: BODY_KIND.OBJECT, data: deepMapStrings(exampleObj, () => huge) };
+    }
+    return { kind: BODY_KIND.VALID };
+  }
+
   // Success cases, auth cases, and NEG-008 (intentional duplicate) all send
   // the valid body — only the status code or auth header differ.
   if (is2xx || tc.category === 'auth' || tc.template_id === 'TPL-NEG-008') {
@@ -45,6 +74,31 @@ export function getTestBody(tc, exampleObj) {
   const entries = Object.entries(exampleObj);
 
   switch (tc.template_id) {
+
+    // Flip every field to the wrong type including arrays → null.
+    // For stream endpoints this makes the input field (messages, content, etc.) null.
+    case 'TPL-STR-002':
+      return {
+        kind: BODY_KIND.OBJECT,
+        data: Object.fromEntries(entries.map(([k, v]) => [
+          k,
+          Array.isArray(v)       ? null  :
+          typeof v === 'string'  ? 12345 :
+          typeof v === 'number'  ? 'abc' :
+          typeof v === 'boolean' ? 'yes' : v,
+        ])),
+      };
+
+    // Empty all collection and string fields — sends messages:[] for chat APIs.
+    case 'TPL-STR-003':
+      return {
+        kind: BODY_KIND.OBJECT,
+        data: Object.fromEntries(entries.map(([k, v]) => [
+          k,
+          Array.isArray(v)      ? []  :
+          typeof v === 'string' ? ''  : v,
+        ])),
+      };
 
     // Send an empty body so all required fields are absent.
     case 'TPL-NEG-001':
