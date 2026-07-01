@@ -2,6 +2,10 @@
 // that overrides spec/config defaults). Reuses the specs-store setters + saveSpecs
 // the browser uses, so edits are written exactly like Save Specs in the UI.
 
+import { readFile, writeFile, access } from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import path from 'node:path';
+
 import { parseEndpointArg } from '../lib/endpoint-select.js';
 import { readBodyArg, parseHeaderFlags } from '../lib/read-input.js';
 import { deriveEndpointCases } from '../../scripts/core/derive-endpoint.js';
@@ -10,6 +14,49 @@ import { REQUEST_TYPES } from '../../scripts/core/request-types.js';
 import { RESPONSE_BODY_TYPES } from '../../scripts/core/response-body-types.js';
 import { UsageError } from '../lib/errors.js';
 import { color } from '../runtime/logger.js';
+
+// Decode the exp claim from a JWT without verifying the signature.
+function jwtExp(token) {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    return JSON.parse(Buffer.from(payload, 'base64url').toString()).exp ?? null;
+  } catch { return null; }
+}
+
+// When specs set --token is called, keep karate-config.js in sync so the
+// Karate runner picks up the new credential immediately.  The file is
+// intentionally write-once on first export, so we patch just the token/
+// expiredToken lines rather than regenerating the whole file (preserving any
+// hand-edits the user made to e.g. baseUrl or environment overrides).
+async function syncKarateConfig(projectRoot, swaggerId, newToken, logger) {
+  const cfgPath = path.join(projectRoot, 'output', swaggerId, 'karate', 'karate-config.js');
+  try { await access(cfgPath, fsConstants.F_OK); } catch { return; }
+
+  let src = await readFile(cfgPath, 'utf8');
+
+  // Match the `token:` line (not expiredToken / invalidToken — the leading
+  // whitespace + exact word "token" ensures we don't hit sub-words).
+  const tokenLine = src.match(/^([ \t]+token:\s*')([^']*)('.*?)$/m);
+  if (!tokenLine) return;
+  const oldToken = tokenLine[2];
+  if (oldToken === newToken) return;
+
+  // Replace the active token.
+  src = src.replace(/^([ \t]+token:\s*')([^']*)('.*?)$/m, `$1${newToken}$3`);
+
+  // If the old token was a real JWT that has since expired, demote it to
+  // expiredToken so TC-AUTH-003 (expired token) gets a genuine expired credential.
+  const exp = jwtExp(oldToken);
+  const isExpired = exp !== null && exp < Date.now() / 1000;
+  if (isExpired) {
+    src = src.replace(/^([ \t]+expiredToken:\s*')([^']*)('.*?)$/m, `$1${oldToken}$3`);
+  }
+
+  await writeFile(cfgPath, src, 'utf8');
+  const note = isExpired ? ' (old token demoted to expiredToken)' : '';
+  logger.out(`  ${color.dim('•')} karate-config.js patched${note}`);
+}
 
 const VALID_REQUEST_TYPES = REQUEST_TYPES.map((t) => t.key);
 const VALID_RESPONSE_TYPES = RESPONSE_BODY_TYPES.map((t) => t.key);
@@ -119,6 +166,11 @@ async function runSet(ctx, args, logger) {
       for (const c of changes) logger.out(`  ${color.dim('•')} ${c}`);
     },
   );
+
+  if (saved && args.token !== undefined) {
+    await syncKarateConfig(ctx.projectRoot, ctx.entry.id, args.token, logger);
+  }
+
   return 0;
 }
 
