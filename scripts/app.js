@@ -1,5 +1,6 @@
 import { loadManifest, loadSwagger, getTagsFromSpec, getEndpointsByTag } from './core/swagger-loader.js';
-import { profileEndpoint, matchTemplates, getOperation, authEnforced } from './core/template-matcher.js';
+import { matchTemplates, getOperation, authEnforced } from './core/template-matcher.js';
+import { deriveEndpointCases } from './core/derive-endpoint.js';
 import { initRequestBuilder, resetRequestBuilder, runTestCase, setOnResponse, captureTryItAuth, captureTryItBody, captureTryItBaseUrl, captureTryItHeader } from './tryit/request-ui.js';
 import { exportPostman } from './exporters/postman-collection-builder.js';
 import { exportKarate } from './exporters/karate-feature-builder.js';
@@ -8,9 +9,7 @@ import * as specsStore from './specs-store.js';
 import { generateTestCasesFromResponse } from './generate/response-test-generator.js';
 import { compareTestCases } from './core/case-order.js';
 import { REQUEST_TYPES, DEFAULT_REQUEST_TYPE, requestTypeOptionLabel } from './core/request-types.js';
-import { RESPONSE_BODY_TYPES, SSE_DIALECTS, detectResponseBodyType, sniffSseDialect } from './core/response-body-types.js';
-import { responseSchema } from './tryit/schema-validator.js';
-import { expandMethodNotAllowed } from './core/case-expander.js';
+import { RESPONSE_BODY_TYPES, SSE_DIALECTS } from './core/response-body-types.js';
 import { filterAndSort } from './ui/filter-sort.js';
 import { esc } from './ui/dom.js';
 import { activateTab, bindTabs } from './ui/tabs.js';
@@ -158,33 +157,11 @@ function onEndpointChange(value) {
 // overrides), matches templates, expands the 405 cases, and renders the table +
 // Try It tab. Re-runnable so the request-type dropdown can refresh in place.
 function deriveAndRenderEndpoint(method, path, operation) {
-  currentProfile = profileEndpoint(path, method, operation, currentSpec);
-  // Honor a per-endpoint auth-required override from specs.json (set by Try It
-  // auth discovery or hand-edited) — the spec often marks auth as optional when
-  // the endpoint really enforces it.
-  currentProfile.auth_required =
-    specsStore.effectiveAuthRequired(method, path, currentProfile.auth_required);
-  // Request type is a manual, per-endpoint selection (no spec auto-detection); it
-  // gates which templates match and drives the request-side handler seam.
-  const requestType = specsStore.effectiveRequestType(method, path);
-  currentProfile.request_type = requestType;
-  // Response body type drives the 2xx success assertions (exporters + Try It).
-  // Auto-detected from the spec's 2xx content type (with a request-type hint),
-  // overridable per endpoint in specs.json.
-  const autoBodyType = detectResponseBodyType(responseContentTypes(operation), requestType);
-  const bodyType = specsStore.effectiveResponseBodyType(method, path, autoBodyType);
-  currentProfile.response_body_type = bodyType;
-  currentProfile.sse_dialect = bodyType === 'sse'
-    ? specsStore.effectiveSseDialect(method, path, sniffDialect(method, path, operation))
-    : null;
-  matchedCases     = matchTemplates(currentProfile, templates);
-
-  // Expand TPL-NEG-009 into one case per disallowed method (every standard HTTP
-  // method not defined on this path in the spec) so each unsupported method is
-  // exercised — e.g. a GET-only path yields POST, PUT, PATCH and DELETE cases.
-  // Each gets a method-suffixed id so its result persists independently.
-  const allowedOnPath = Object.keys(currentSpec.paths?.[path] ?? {});
-  matchedCases = expandMethodNotAllowed(matchedCases, allowedOnPath);
+  // Profiling + override layering + template matching + 405 expansion is shared
+  // with the CLI in core/derive-endpoint.js so both produce identical cases.
+  const derived = deriveEndpointCases(method, path, operation, currentSpec, specsStore, templates);
+  currentProfile = derived.profile;
+  matchedCases   = derived.cases;
 
   document.getElementById('api-meta').textContent =
     `${method}  ${path} — ${operation.summary || ''}`;
@@ -241,33 +218,6 @@ function syncTypeSelectors() {
   if (resSel) resSel.value = currentProfile.response_body_type;
   if (sseSel && currentProfile.sse_dialect) sseSel.value = currentProfile.sse_dialect;
   setRequestTypeVisible(true);
-}
-
-// The endpoint's 2xx response media types (for response-body-type auto-detection).
-function responseContentTypes(operation) {
-  const responses = operation?.responses ?? {};
-  const out = [];
-  for (const [code, resp] of Object.entries(responses)) {
-    if (!/^2\d\d$/.test(code)) continue;
-    if (resp?.content) out.push(...Object.keys(resp.content));
-  }
-  return out;
-}
-
-// Best-effort SSE dialect from the effective host / header names / 2xx schema shape.
-function sniffDialect(method, path, operation) {
-  let host = '';
-  try { host = new URL(specsStore.effectiveBaseUrl(method, path)).host; } catch { /* relative/blank base */ }
-  const headerNames = Object.keys(specsStore.effectiveHeaderParams(method, path, operation) ?? {});
-  const schema = responseSchema(twoxxResponse(operation) ?? {});
-  const schemaHasChoices = !!schema?.properties?.choices;
-  return sniffSseDialect({ host, headerNames, schemaHasChoices });
-}
-
-function twoxxResponse(operation) {
-  const responses = operation?.responses ?? {};
-  const code = Object.keys(responses).find(c => /^2\d\d$/.test(c));
-  return code ? responses[code] : null;
 }
 
 function runTc(tcId) {

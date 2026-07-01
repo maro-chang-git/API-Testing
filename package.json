@@ -5,12 +5,16 @@
   "scripts": {
     "dev": "vite",
     "save-server": "set PORT=5501 && python .claude/devserver.py",
-    "lint": "eslint scripts/",
+    "lint": "eslint scripts/ cli/",
     "test": "vitest run",
     "test:watch": "vitest",
+    "cli": "node cli/index.js",
     "newman": "newman run",
     "karate:setup": "powershell -ExecutionPolicy Bypass -File tools/setup-karate.ps1",
     "karate": "powershell -ExecutionPolicy Bypass -File tools/run-karate.ps1"
+  },
+  "bin": {
+    "api-test": "cli/index.js"
   },
   "repository": {
     "type": "git",

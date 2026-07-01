@@ -1,4 +1,4 @@
-import { isCookieAuth } from '../tryit/request-core.js';
+import { classifyAuth } from '../core/auth-header.js';
 import { getConfig } from '../core/config-loader.js';
 import { effectiveBaseUrl, effectiveAuth, effectiveHeaders, effectiveHeaderParams, effectivePathParams, effectiveRequestBody, saveOrDownload } from '../specs-store.js';
 import { getTestBody, BODY_KIND } from './body-builder.js';
@@ -405,23 +405,14 @@ function buildHeaders(tc, profile, hasBody, headerParams = []) {
 
 function resolveAuthHeader(tc, profile) {
   const auth         = effectiveAuth();
-  // Cookie auth comes from the persisted effective selection (auth.in / auth.type),
-  // not just the spec's scheme name — a spec that declares no scheme has
-  // auth_type 'none', so deciding solely on isCookieAuth(profile.auth_type) would
-  // export a Cookie selection as Bearer. Spec name is kept as a fallback.
-  const cookieAuth   = auth.in === 'cookie' || isCookieAuth(auth.type) || isCookieAuth(profile.auth_type);
-  const apiKeyHeader = auth.kind === 'apiKey' && auth.in === 'header';
+  // Auth style (cookie / raw apiKey header / Bearer) + cookie naming is classified
+  // once in core/auth-header.js, shared with Karate, Try It and the CLI live-runner.
+  const { cookieAuth, apiKeyHeader, headerName: key, fullCookie, cookieName } = classifyAuth(auth, profile);
   const invalid      = auth.invalidTokenValue;
 
-  // A persisted full `name=value` cookie is sent verbatim (Cookie: {{token}});
-  // a bare value is prefixed with the cookie name. The name is reused for the
-  // invalid/expired auth-test credentials (whose values are always bare).
-  const fullCookie = cookieAuth && String(auth.token || '').includes('=');
-  const cookieName = fullCookie ? String(auth.token).split('=')[0] : 'session';
-
-  // Header key + value-wrapper for the active auth style: a cookie, a raw apiKey
-  // header (e.g. x-api-key — no Bearer prefix), or a Bearer Authorization header.
-  const key       = cookieAuth ? 'Cookie' : apiKeyHeader ? (auth.name || 'X-API-Key') : 'Authorization';
+  // Value-wrapper for the active auth style: a persisted full `name=value` cookie
+  // is sent verbatim (Cookie: {{token}}); a bare value is prefixed with the cookie
+  // name. The name is reused for the invalid/expired auth-test credentials.
   const wrapValid = cookieAuth ? (fullCookie ? v => `${v}` : v => `${cookieName}=${v}`)
                   : apiKeyHeader ? v => `${v}`
                   : v => `Bearer ${v}`;

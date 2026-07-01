@@ -3,6 +3,7 @@ import { expectedStatuses } from '../core/template-matcher.js';
 import * as specsStore from '../specs-store.js';
 import { validateResponse } from './schema-validator.js';
 import { isCookieAuth, buildRequestUrl, buildRequestHeaders, buildRequestBody } from './request-core.js';
+import { classifyAuth } from '../core/auth-header.js';
 import { isEventStream, parseEventStream } from './sse-parser.js';
 
 let _profile   = null;   // endpoint profile from template-matcher
@@ -268,10 +269,13 @@ function renderAuthSection() {
 
   const auth = specsStore.effectiveAuth();
   if (_profile?.auth_required && auth.token) {
-    typeSel.value = auth.in === 'query'                              ? 'api_key_query'
-                  : (auth.in === 'cookie' || isCookieAuth(auth.type)) ? 'cookie'
-                  : (auth.kind === 'apiKey' && auth.in === 'header')  ? 'api_key_header'
-                  :                                                     'bearer';
+    // Auth style is classified once in core/auth-header.js (shared with the
+    // exporters + CLI). Query apiKey isn't a header, so it's handled separately.
+    const { cookieAuth, apiKeyHeader } = classifyAuth(auth, _profile);
+    typeSel.value = auth.in === 'query' ? 'api_key_query'
+                  : cookieAuth          ? 'cookie'
+                  : apiKeyHeader        ? 'api_key_header'
+                  :                       'bearer';
     valEl.value = typeSel.value === 'cookie' ? `session=${auth.token}` : auth.token;
     // For a header apiKey scheme, seed the header name from the spec (e.g. x-api-key).
     keyEl.value = typeSel.value === 'api_key_header' ? (auth.name || 'X-API-Key') : '';

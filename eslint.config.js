@@ -30,4 +30,26 @@ export default [
       globals: { ...globals.node },
     },
   },
+
+  // The CLI is Node code (not browser): Node globals + the web-standard globals
+  // Node exposes (fetch / performance / URL …). Distinct from the scripts/ block,
+  // which assumes the browser.
+  {
+    files: ['cli/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+        fetch: 'readonly',
+        performance: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+        globalThis: 'readonly',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { args: 'none' }],
+    },
+  },
 ];
