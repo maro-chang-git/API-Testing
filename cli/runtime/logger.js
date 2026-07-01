@@ -28,9 +28,24 @@ export const color = {
 export function createLogger({ json = false, logFile = null, verbose = false } = {}) {
   const startTime = performance.now();
 
+  // Redact bearer tokens and API keys from log lines so --log run.log doesn't
+  // write credentials to disk in cleartext. Covers the common Bearer/token patterns
+  // and JSON "token":"..." fields that appear in --json stdout lines.
+  const REDACT = [
+    /Bearer\s+[A-Za-z0-9\-._~+/]+=*/g,          // Authorization: Bearer <jwt>
+    /"token"\s*:\s*"([^"]{8,})"/g,               // JSON { "token": "..." }
+    /("auth"\s*:\s*\{[^}]*"token"\s*:\s*)"([^"]{8,})"/g,
+  ];
+  function redact(text) {
+    let out = text;
+    out = out.replace(REDACT[0], 'Bearer [REDACTED]');
+    out = out.replace(REDACT[1], '"token":"[REDACTED]"');
+    return out;
+  }
+
   const tee = (line) => {
     if (!logFile) return;
-    try { appendFileSync(logFile, `${new Date().toISOString()} ${line.replace(ANSI, '')}\n`); }
+    try { appendFileSync(logFile, `${new Date().toISOString()} ${redact(line.replace(ANSI, ''))}\n`); }
     catch { /* logging must never crash the command */ }
   };
 

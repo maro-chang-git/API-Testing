@@ -11,6 +11,7 @@ import { classifyAuth } from '../../scripts/core/auth-header.js';
 import { isEventStream, parseEventStream } from '../../scripts/tryit/sse-parser.js';
 import { validateResponse } from '../../scripts/tryit/schema-validator.js';
 import { expectedStatuses } from '../../scripts/core/template-matcher.js';
+import { getTestBody, BODY_KIND } from '../../scripts/exporters/body-builder.js';
 
 // Decide the credential a request should send, honoring an auth-category test
 // case's preset (missing → none, invalid → tampered value, expired → expired
@@ -75,11 +76,27 @@ export async function runLive(ctx, { method, path, operation, profile, tc = null
   if (authHeader) headers[authHeader.name] = authHeader.value;
   for (const { key, val } of overrides.headers || []) if (key) headers[key] = val;
 
-  // Body: explicit override (raw text) or the effective example, for body methods.
+  // Body: explicit override wins; otherwise apply the test-case's body mutation (negative/boundary
+  // cases send a deliberately wrong body via body-builder's getTestBody), falling back to the
+  // effective example body for happy/auth/positive cases.
   let bodyText = overrides.body;
   if (bodyText == null && hasBody) {
     const example = ss.effectiveRequestBody(method, path, operation, ctx.spec);
-    if (example != null) bodyText = JSON.stringify(example);
+    if (tc) {
+      const descriptor = getTestBody(tc, example && typeof example === 'object' && !Array.isArray(example) ? example : null);
+      if (descriptor.kind === BODY_KIND.EMPTY) {
+        bodyText = '{}';
+      } else if (descriptor.kind === BODY_KIND.MALFORMED) {
+        bodyText = descriptor.data;
+      } else if (descriptor.kind === BODY_KIND.OBJECT) {
+        bodyText = JSON.stringify(descriptor.data);
+      } else {
+        // VALID — use the effective example as-is
+        if (example != null) bodyText = JSON.stringify(example);
+      }
+    } else {
+      if (example != null) bodyText = JSON.stringify(example);
+    }
   }
   const body = buildRequestBody(method, bodyText);
 

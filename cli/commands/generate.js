@@ -10,13 +10,19 @@ import { filenameSlug } from '../../scripts/exporters/export-shared.js';
 import { exportPostman } from '../../scripts/exporters/postman-collection-builder.js';
 import { exportKarate } from '../../scripts/exporters/karate-feature-builder.js';
 import { writeTestcases } from '../lib/testcase-file.js';
+import { UsageError } from '../lib/errors.js';
 import { color } from '../runtime/logger.js';
 
 // Which output formats to produce. --format "a,b" is explicit; otherwise JSON is
 // always produced and --postman / --karate add those.
+const VALID_FORMATS = new Set(['json', 'postman', 'karate']);
+
 function resolveFormats(args) {
   if (args.format) {
-    const set = new Set(args.format.split(',').map((s) => s.trim().toLowerCase()));
+    const tokens = args.format.split(',').map((s) => s.trim().toLowerCase());
+    const unknown = tokens.filter((t) => !VALID_FORMATS.has(t));
+    if (unknown.length) throw new UsageError(`Unknown --format value(s): ${unknown.join(', ')}. Valid: json, postman, karate.`);
+    const set = new Set(tokens);
     return { json: set.has('json'), postman: set.has('postman'), karate: set.has('karate') };
   }
   return { json: true, postman: !!args.postman, karate: !!args.karate };

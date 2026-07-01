@@ -23,9 +23,13 @@ export async function run(ctx, args, logger) {
     return 0;
   }
 
+  // Derive the content type from the operation's request body media type (if any).
+  const reqBody = operation.requestBody || operation.parameters?.find((p) => p.in === 'body');
+  const contentType = (reqBody?.content ? Object.keys(reqBody.content)[0] : null) || 'application/json';
+
   // Primary output is the JSON body itself (pipeable), in both modes.
   logger.result(
-    { endpoint: `${method} ${path}`, body },
+    { endpoint: `${method} ${path}`, contentType, body },
     () => logger.out(JSON.stringify(body, null, 2)),
   );
   return 0;

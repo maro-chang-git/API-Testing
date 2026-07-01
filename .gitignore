@@ -4,7 +4,10 @@ node_modules/*
 tests/*
 context/*
 .mcp.json
+
+# Notes - documents
 TODO.md
+TODO-cli.md
 CLAUDE.md
 
 # Karate runner binaries (downloaded by tools/setup-karate.ps1; scripts are tracked)
@@ -16,3 +19,4 @@ tools/jre-extract/
 
 # Karate report
 target/*
+

@@ -71,12 +71,23 @@ function endpointTarget(ctx, args) {
 async function runGet(ctx, args, logger) {
   logger.banner(`specs get — ${ctx.entry.id}${args.endpoint ? `  ${args.endpoint}` : ''}`);
   const ss = ctx.specsStore;
+  const auth = ss.effectiveAuth();
   const swagger = {
     baseUrl: ss.effectiveBaseUrl(ctx.spec),
-    auth: ss.effectiveAuth(),
+    auth,
     headers: ss.effectiveHeaders(),
   };
-  const result = { swagger: ctx.entry.id, ...swagger };
+  // Top-level convenience fields match the documented --json schema.
+  // Note: authRequired is per-endpoint, not per-swagger — expose it when --endpoint is given;
+  // at the swagger level we expose tokenSet (whether a credential is configured).
+  const result = {
+    swagger: ctx.entry.id,
+    baseUrl: swagger.baseUrl,
+    tokenSet: !!auth.token,
+    headers: swagger.headers,
+    // Full auth object for deeper inspection (token value intentionally omitted — see specs set).
+    auth: { type: auth.type, in: auth.in, name: auth.name, tokenSet: !!auth.token },
+  };
 
   if (args.endpoint) {
     const { method, path } = endpointTarget(ctx, args);
@@ -97,7 +108,7 @@ async function runGet(ctx, args, logger) {
   logger.result(result, () => {
     logger.out(color.bold(`Specs — ${ctx.entry.id}`));
     logger.out(`  baseUrl : ${swagger.baseUrl}`);
-    logger.out(`  auth    : ${swagger.auth.type} (${swagger.auth.in})  token=${swagger.auth.token ? '<set>' : '<empty>'}`);
+    logger.out(`  auth    : ${auth.type} (${auth.in})  token=${auth.token ? '<set>' : '<empty>'}`);
     logger.out(`  headers : accept=${swagger.headers.accept}  content-type=${swagger.headers.contentType}`);
     if (result.endpoint) {
       const e = result.endpoint;

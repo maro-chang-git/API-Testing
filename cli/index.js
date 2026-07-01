@@ -25,7 +25,6 @@ const OPTIONS = {
   log: { type: 'string' },
   verbose: { type: 'boolean', short: 'v', default: false },
   cwd: { type: 'string' },
-  out: { type: 'string' },
   help: { type: 'boolean', short: 'h', default: false },
   // generate / export
   postman: { type: 'boolean', default: false },
@@ -119,7 +118,14 @@ main(process.argv.slice(2))
   .then((code) => process.exit(code))
   .catch((err) => {
     const isUsage = err instanceof UsageError;
-    // In --json mode a parse error has no logger yet; print a JSON error to stderr.
+    const isJson = process.argv.includes('--json');
+    // In --json mode emit a structured error object to stdout so agents always
+    // get a parseable JSON result, then echo the message to stderr for humans.
+    if (isJson) {
+      process.stdout.write(JSON.stringify({
+        error: { type: isUsage ? 'usage' : 'runtime', message: err.message },
+      }) + '\n');
+    }
     process.stderr.write(`${color.red('✖')} ${err.message}\n`);
     if (process.argv.includes('--verbose') || process.argv.includes('-v')) {
       process.stderr.write((err.stack || '') + '\n');

@@ -51,8 +51,8 @@ node cli/index.js specs set --swagger testek \
   --token "$TOKEN"
 
 node cli/index.js specs get --swagger testek --json
-# AI reads: { baseUrl, token, headers, authRequired }
-# AI checks: baseUrl is not blank, token is set.
+# AI reads: { baseUrl, tokenSet, headers, auth }
+# AI checks: baseUrl is not blank, tokenSet is true.
 # If not: re-run specs set with the correct values before continuing.
 ```
 
@@ -62,11 +62,11 @@ node cli/index.js specs get --swagger testek --json
 
 ```bash
 node cli/index.js list --json
-# AI reads: [{ id, title, file }]
+# AI reads: [{ id, title, file }]   ← plain array, one entry per swagger
 # AI picks the target swagger id for all subsequent steps.
 
 node cli/index.js list --swagger testek --json
-# AI reads: { tags, endpoints: [{ method, path, tags, summary }] }
+# AI reads: { swagger, title, tags, endpointCount, endpoints: [{ method, path, tags, summary }] }
 # AI builds a work list: which endpoints to test, which tags to focus on.
 ```
 
@@ -79,8 +79,9 @@ Start with a single endpoint to verify output before running the whole swagger.
 ```bash
 # Single endpoint — JSON output only:
 node cli/index.js generate --swagger testek --endpoint "GET /me/profile" --json
-# AI reads: [{ id, endpoint, category, expected_status, description }]
-# AI checks: are all 5 categories present? (happy_path, positive, negative, auth, boundary)
+# AI reads: { swagger, totalCases, endpoints:[{ endpoint, total, byCategory, files }] }
+# AI checks: are all 5 categories present in byCategory? (happy_path, positive, negative, auth, boundary)
+# Per-case detail is in the written testcases JSON (files[0]).
 
 # Single endpoint — also write Postman + Karate files:
 node cli/index.js generate --swagger testek --endpoint "GET /me/profile" --postman --karate --json
@@ -105,10 +106,9 @@ enrich them with what the API actually returns.
 ```bash
 node cli/index.js explore --swagger testek \
   --endpoint "GET /me/profile" --token "$TOKEN" --save --json
-# AI reads: { assertions: [...], folded: 3, saved: true }
+# AI reads: { endpoint, source, status, attached, folded, saved, enrichedCases, savedFile }
 # AI checks: folded > 0 means assertions were derived and written.
-# If folded: 0, the response may have been empty or an error — investigate
-# with Step 4 before re-exploring.
+# If folded: 0, check `note` — the response may have been an error or a stream.
 
 # Seed every endpoint at once:
 node cli/index.js explore --swagger testek --all --token "$TOKEN" --save --json
@@ -122,7 +122,7 @@ node cli/index.js explore --swagger testek --all --token "$TOKEN" --save --json
 # Run all template cases for one endpoint:
 node cli/index.js request --swagger testek \
   --endpoint "GET /me/profile" --token "$TOKEN" --json
-# AI reads: { status, ok, timing_ms, headers, body, case: { id, passed, expected_status } }
+# AI reads: { ok, status, timing_ms, headers, body, case: { id, passed, expected_status } }
 # If ok: false or case.passed: false → AI inspects body/headers, adjusts specs
 # or the request body, then retries.
 
@@ -146,7 +146,7 @@ and adds auth test cases — same as the browser's Try It tab.
 curl -s "$API/me/profile" -H "Authorization: Bearer $TOKEN" \
   | node cli/index.js validate --swagger testek \
       --endpoint "GET /me/profile" --status 200 --json
-# AI reads: { valid, errors: [{ message, path }] }
+# AI reads: { valid, errors: [{ path, message }] }
 # If valid: false → AI reads errors, edits the body or the spec, re-validates.
 
 # Validate a file captured by another tool:
@@ -160,7 +160,7 @@ node cli/index.js validate --swagger testek \
 
 ```bash
 node cli/index.js coverage --swagger testek --json
-# AI reads: { total, covered, uncovered, gaps: [{ endpoint, missing: [category] }] }
+# AI reads: { endpointCount, covered, uncovered, gaps: [{ endpoint, missing: [category] }] }
 # For each gap: AI runs explore --save on that endpoint, then re-checks coverage.
 # Repeat until uncovered: 0 or the remaining gaps are intentional.
 ```
@@ -307,34 +307,63 @@ list (no --swagger):
 [{ "id": "testek", "title": "TestEK API", "file": "swaggers/testek.json" }]
 
 list --swagger <id>:
-{ "tags": ["Users", "Products"],
-  "endpoints": [{ "method": "GET", "path": "/me/profile", "tags": [...], "summary": "..." }] }
+{ "swagger": "testek", "title": "TestEK API", "tags": ["Users", "Products"],
+  "endpointCount": 12,
+  "endpoints": [{ "method": "GET", "path": "/me/profile", "tags": ["Users"], "summary": "...", "endpoint": "GET /me/profile" }] }
 
 generate:
-[{ "id": "TC-HP-001", "endpoint": "GET /me/profile",
-   "category": "happy_path", "expected_status": 200, "description": "..." }]
+{ "swagger": "testek", "formats": ["json", "postman"],
+  "endpointCount": 1, "totalCases": 18,
+  "endpoints": [{ "endpoint": "GET /me/profile", "total": 18,
+                  "byCategory": { "happy_path": 1, "auth": 4, ... },
+                  "files": ["output/testek/api-get-me-profile-testcases.json"] }] }
+# Per-case detail is in the written testcases JSON (files[0]).
 
 body:
-{ "contentType": "application/json", "body": { ... } }
+{ "endpoint": "POST /category", "contentType": "application/json", "body": { ... } }
 
 request:
-{ "status": 200, "ok": true, "timing_ms": 123,
-  "headers": { ... }, "body": { ... },
-  "case": { "id": "TC-AUTH-001", "passed": true, "expected_status": 401 } }
+{ "ok": true, "status": 200, "timing_ms": 123,
+  "headers": { "content-type": "application/json", ... },
+  "body": "{ ... }",
+  "contentType": "application/json",
+  "schema": { "valid": true, "kind": "pass", "message": "...", "errors": [] },
+  "case": { "id": "TC-AUTH-001", "passed": true, "expected_status": [401] },
+  "authPromotion": null,
+  "error": null,
+  "request": { "method": "GET", "url": "https://...", "headers": { ... }, "body": null } }
 
 validate:
-{ "valid": true, "errors": [] }
-{ "valid": false, "errors": [{ "message": "must be string", "path": "/name" }] }
+{ "endpoint": "GET /me/profile", "status": "200",
+  "valid": true, "kind": "pass", "message": "Schema valid — ...", "errors": [] }
+{ "valid": false, "kind": "fail", "message": "2 issues found ...",
+  "errors": [{ "path": "/name", "message": "must be string" }] }
 
-explore:
-{ "assertions": [...], "folded": 3, "saved": true }
+explore (single endpoint):
+{ "endpoint": "GET /me/profile", "source": "live", "status": 200,
+  "attached": 3, "orphanCount": 0,
+  "folded": 3, "saved": true,
+  "enrichedCases": [{ "id": "TC-HP-001", "assertions": 3 }],
+  "savedFile": "output/testek/api-get-me-profile-testcases.json" }
+
+explore (--all / --tag):
+{ "swagger": "testek", "endpointCount": 5, "totalAttached": 12,
+  "endpoints": [{ "endpoint": "GET /me/profile", "source": "live", "status": 200,
+                  "attached": 3, "folded": 3, "saved": true, ... }] }
 
 coverage:
-{ "total": 12, "covered": 10, "uncovered": 2,
-  "gaps": [{ "endpoint": "POST /category", "missing": ["auth"] }] }
+{ "swagger": "testek", "endpointCount": 12, "covered": 10, "uncovered": 2,
+  "totalCases": 180, "totalsByCategory": { "happy_path": 12, ... },
+  "gaps": [{ "endpoint": "POST /category", "missing": ["auth"] }],
+  "endpoints": [ ... per-endpoint detail ... ] }
 
 specs get:
-{ "baseUrl": "https://...", "token": "...", "headers": { ... }, "authRequired": true }
+{ "swagger": "testek", "baseUrl": "https://...",
+  "tokenSet": true,
+  "headers": { "accept": "application/json", "contentType": "application/json" },
+  "auth": { "type": "http", "in": "header", "name": "Authorization", "tokenSet": true },
+  "endpoint": { "target": "GET /me/profile", "authRequired": true,
+                "requestType": "regular", "responseBodyType": "json", ... } }
 ```
 
 ## AI / automation patterns

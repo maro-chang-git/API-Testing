@@ -6,6 +6,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { UsageError } from './errors.js';
+import path from 'node:path';
 
 // Parse repeated --header "Name: value" flags into an ordered name→value map.
 export function parseHeaderFlags(flags = []) {
@@ -25,14 +26,21 @@ export async function readBodyArg(arg, projectRoot = process.cwd()) {
 
   if (arg.startsWith('@')) {
     const file = arg.slice(1);
-    const path = await import('node:path');
-    return readFile(path.isAbsolute(file) ? file : path.join(projectRoot, file), 'utf8');
+    // Resolve relative @file against the user's real CWD, not the project root
+    // (projectRoot is the API Testing directory — wrong for files the user created
+    // in their shell's working directory).
+    return readFile(path.isAbsolute(file) ? file : path.join(process.cwd(), file), 'utf8');
   }
 
   return arg;
 }
 
 function readStdin() {
+  // Fail fast when stdin is a terminal — the process would block forever waiting
+  // for EOF that never comes, with no prompt shown to the user.
+  if (process.stdin.isTTY) {
+    throw new UsageError('No input on stdin — pass --body @file, an inline value, or pipe a body.');
+  }
   return new Promise((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf8');

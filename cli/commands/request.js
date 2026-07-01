@@ -10,6 +10,7 @@ import { selectEndpoints } from '../lib/endpoint-select.js';
 import { deriveEndpointCases } from '../../scripts/core/derive-endpoint.js';
 import { runLive } from '../lib/live-runner.js';
 import { readBodyArg, parseHeaderFlags } from '../lib/read-input.js';
+import { maybePromoteAuth } from '../lib/auth-promote.js';
 import { UsageError } from '../lib/errors.js';
 import { color } from '../runtime/logger.js';
 
@@ -44,7 +45,38 @@ export async function run(ctx, args, logger) {
   logger.step('sending request…');
   const result = await runLive(ctx, { method, path, operation, profile, tc, overrides });
 
-  logger.result(result, () => {
+  // A live 401/403 on a non-auth-required endpoint promotes it automatically.
+  let authPromotion = null;
+  if (result.ok && !tc) {
+    const promotion = await maybePromoteAuth(ctx, method, path, operation, profile, result.response.status, ctx.templates);
+    if (promotion.promoted) {
+      authPromotion = { addedAuthCases: promotion.addedAuthCases };
+      logger.warn(`${result.response.status} response — endpoint promoted to auth-required; added ${promotion.addedAuthCases} auth test case(s). Specs saved.`);
+    }
+  }
+
+  // Build a flat, agent-friendly --json shape on top of the internal result.
+  const jsonOut = {
+    ok: result.ok,
+    status: result.response?.status ?? null,
+    timing_ms: result.response?.elapsed ?? null,
+    headers: result.response?.headers ?? null,
+    body: result.response?.body ?? null,
+    contentType: result.response?.contentType ?? null,
+    stream: result.stream ?? null,
+    schema: result.schema
+      ? { valid: result.schema.kind !== 'fail', kind: result.schema.kind, message: result.schema.message, errors: result.schema.errors.map((e) => ({ path: e.path, message: e.msg })) }
+      : null,
+    case: result.testCase
+      ? { id: result.testCase.id, passed: result.testCase.passed, expected_status: result.testCase.expected }
+      : null,
+    authPromotion,
+    error: result.error ?? null,
+    // Echo the outgoing request so agents can audit what was actually sent.
+    request: result.request,
+  };
+
+  logger.result(jsonOut, () => {
     const r = result;
     logger.out(`${color.bold(r.request.method)} ${r.request.url}`);
     if (!r.ok) { logger.out(color.red(`✖ request failed: ${r.error}`)); return; }

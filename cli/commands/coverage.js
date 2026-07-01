@@ -45,13 +45,26 @@ export async function run(ctx, args, logger) {
   }
 
   const totalCases = rows.reduce((n, r) => n + r.total, 0);
+  const coveredCount = rows.filter((r) => r.total > 0).length;
+  // Flat gaps array (documented shape): one entry per endpoint with missing categories.
+  const gapsFlat = rows
+    .filter((r) => r.missingCategories.length || (r.authRequired && !r.hasAuthTests))
+    .map((r) => {
+      const missing = [...r.missingCategories];
+      if (r.authRequired && !r.hasAuthTests && !missing.includes('auth')) missing.push('auth');
+      return { endpoint: r.endpoint, missing };
+    });
+
   const result = {
     swagger: ctx.entry.id,
     endpointCount: rows.length,
+    covered: coveredCount,
+    uncovered: rows.length - coveredCount,
     totalCases,
     categoriesTracked: CATEGORY_ORDER,
     totalsByCategory: totalsByCat,
-    gaps,
+    gaps: gapsFlat,
+    // Detailed breakdown per endpoint for deeper analysis.
     endpoints: rows,
   };
 
