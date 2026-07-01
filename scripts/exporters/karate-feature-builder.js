@@ -203,8 +203,7 @@ function buildAuthOutline(cases, profile, method, hasBody, { authHeaderName, aut
   // auth outline honours multi-status templates like the regular scenarios do.
   lines.push(`    Then match [<status>] contains responseStatus`);
   lines.push(`    * assert responseTime < ${getConfig().responseTimeThresholdMs}`);
-  lines.push(`    * match response == '#object'`);
-  lines.push(`    * assert response.message != null || response.error != null || response.detail != null`);
+  lines.push(`    * match responseHeaders['WWW-Authenticate'] == '#present'`);
   lines.push('');
   lines.push(`    Examples:`);
   const rows = cases.map(tc => [

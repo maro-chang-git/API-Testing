@@ -334,19 +334,27 @@ function templateBlocks(tc, statuses) {
       }
     }
   } else if (is4xx(primary)) {
-    out.push([
-      `pm.test('Error response is valid JSON', function () {`,
-      `  pm.response.to.have.jsonBody();`,
-      `});`,
-    ]);
-    out.push([
-      `pm.test('Error response includes a message', function () {`,
-      `  var json = pm.response.json();`,
-      `  pm.expect(json).to.satisfy(function (b) {`,
-      `    return !!(b && (b.message || b.error || b.error_description || b.detail || b.errors));`,
-      `  });`,
-      `});`,
-    ]);
+    if (tc.category === 'auth') {
+      out.push([
+        `pm.test('WWW-Authenticate header is present', function () {`,
+        `  pm.expect(pm.response.headers.get('WWW-Authenticate')).to.be.a('string').and.have.length.above(0);`,
+        `});`,
+      ]);
+    } else {
+      out.push([
+        `pm.test('Error response is valid JSON', function () {`,
+        `  pm.response.to.have.jsonBody();`,
+        `});`,
+      ]);
+      out.push([
+        `pm.test('Error response includes a message', function () {`,
+        `  var json = pm.response.json();`,
+        `  pm.expect(json).to.satisfy(function (b) {`,
+        `    return !!(b && (b.message || b.error || b.error_description || b.detail || b.errors));`,
+        `  });`,
+        `});`,
+      ]);
+    }
     if (tc.category === 'security') {
       out.push([
         `pm.test('Injection payload is not reflected unescaped in response', function () {`,
