@@ -5,7 +5,7 @@
  * generated.
  */
 
-export const CATEGORY_ORDER = ['happy_path', 'positive', 'negative', 'auth', 'boundary', 'generated'];
+export const CATEGORY_ORDER = ['happy_path', 'positive', 'negative', 'auth', 'boundary', 'security', 'generated'];
 
 export const CATEGORY_LABEL = {
   happy_path: 'Happy Path',
@@ -13,6 +13,7 @@ export const CATEGORY_LABEL = {
   negative:   'Negative',
   auth:       'Auth',
   boundary:   'Boundary',
+  security:   'Security',
   generated:  'Generated (from response)',
 };
 

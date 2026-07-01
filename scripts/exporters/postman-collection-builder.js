@@ -347,6 +347,16 @@ function templateBlocks(tc, statuses) {
       `  });`,
       `});`,
     ]);
+    if (tc.category === 'security') {
+      out.push([
+        `pm.test('Injection payload is not reflected unescaped in response', function () {`,
+        `  var body = pm.response.text();`,
+        `  pm.expect(body).to.not.include('<script>');`,
+        `  pm.expect(body).to.not.include('DROP TABLE');`,
+        `  pm.expect(body).to.not.include('/etc/passwd');`,
+        `});`,
+      ]);
+    }
   }
   return out;
 }

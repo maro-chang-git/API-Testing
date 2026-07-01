@@ -290,6 +290,12 @@ function buildKarateAssertions(tc, method, lines) {
   } else if (is4xx(primary)) {
     lines.push(`    * match response == '#object'`);
     lines.push(`    * assert response.message != null || response.error != null || response.detail != null`);
+    if (tc.category === 'security') {
+      lines.push(`    # Security: injection payloads must not be reflected unescaped`);
+      lines.push(`    * assert JSON.stringify(response).indexOf('<script>') == -1`);
+      lines.push(`    * assert JSON.stringify(response).indexOf('DROP TABLE') == -1`);
+      lines.push(`    * assert JSON.stringify(response).indexOf('/etc/passwd') == -1`);
+    }
   }
 
   // Folded-in assertions derived from an observed response body.

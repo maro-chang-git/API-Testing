@@ -100,6 +100,67 @@ export function getTestBody(tc, exampleObj) {
       };
     }
 
+    // Special characters in all string fields.
+    case 'TPL-NEG-010':
+      return {
+        kind: BODY_KIND.OBJECT,
+        data: Object.fromEntries(entries.map(([k, v]) => [
+          k, typeof v === 'string' ? '!@#$%^&*()[]{};:<>?,./~`|\\' : v,
+        ])),
+      };
+
+    // Null for every field — triggers required-field validation.
+    case 'TPL-BND-007':
+      return {
+        kind: BODY_KIND.OBJECT,
+        data: Object.fromEntries(entries.map(([k]) => [k, null])),
+      };
+
+    // Empty string for all string fields.
+    case 'TPL-BND-008':
+      return {
+        kind: BODY_KIND.OBJECT,
+        data: Object.fromEntries(entries.map(([k, v]) => [
+          k, typeof v === 'string' ? '' : v,
+        ])),
+      };
+
+    // Zero for all numeric fields.
+    case 'TPL-BND-009':
+      return {
+        kind: BODY_KIND.OBJECT,
+        data: Object.fromEntries(entries.map(([k, v]) => [
+          k, typeof v === 'number' ? 0 : v,
+        ])),
+      };
+
+    // SQL injection in all string fields.
+    case 'TPL-SEC-001':
+      return {
+        kind: BODY_KIND.OBJECT,
+        data: Object.fromEntries(entries.map(([k, v]) => [
+          k, typeof v === 'string' ? "' OR '1'='1'; DROP TABLE users; --" : v,
+        ])),
+      };
+
+    // XSS injection in all string fields.
+    case 'TPL-SEC-002':
+      return {
+        kind: BODY_KIND.OBJECT,
+        data: Object.fromEntries(entries.map(([k, v]) => [
+          k, typeof v === 'string' ? '<script>alert("xss")</script>' : v,
+        ])),
+      };
+
+    // Command injection / path traversal in all string fields.
+    case 'TPL-SEC-003':
+      return {
+        kind: BODY_KIND.OBJECT,
+        data: Object.fromEntries(entries.map(([k, v]) => [
+          k, typeof v === 'string' ? '; ls -la ../../etc/passwd' : v,
+        ])),
+      };
+
     default:
       return { kind: BODY_KIND.VALID };
   }

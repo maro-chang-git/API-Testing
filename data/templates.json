@@ -1,8 +1,8 @@
 {
   "version": "2.2",
   "description": "General-purpose test case templates matched against a selected swagger endpoint at runtime. expected_status is an array of acceptable codes (first = primary) so a generic case passes against the range of conventions real APIs use for the same scenario. applies_to.request_types (optional) restricts a template to the selected per-endpoint request type(s) (regular | stream | upload | download | …); omit to apply to every type. JSON-body cases are gated to [regular, stream]; upload/download have their own TPL-UPL-* / TPL-DL-* cases.",
-  "categories": ["happy_path", "positive", "negative", "auth", "boundary"],
-  "tags": ["valid", "invalid", "missing", "expired", "not_found", "malformed", "duplicate", "method_not_allowed"],
+  "categories": ["happy_path", "positive", "negative", "auth", "boundary", "security"],
+  "tags": ["valid", "invalid", "missing", "expired", "not_found", "malformed", "duplicate", "method_not_allowed", "injection"],
   "templates": [
     {
       "id": "TPL-HP-001",
@@ -343,6 +343,76 @@
       "purpose": "Handle extremely large request payload without crashing",
       "expected_status": [400, 413, 422],
       "notes": "Send a body with hundreds of extra unknown fields — expect 400, 413 (Payload Too Large), or 422, not 500"
+    },
+    {
+      "id": "TPL-NEG-010",
+      "category": "negative",
+      "tag": "invalid",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true, "request_types": ["regular","stream"] },
+      "auth_status": "valid",
+      "purpose": "Reject request when string fields contain special characters",
+      "expected_status": [400, 422],
+      "notes": "Inject special characters (!@#$%^&*()[]{};:<>?,./~`) into all string fields — APIs that validate character sets should return 400 or 422"
+    },
+    {
+      "id": "TPL-BND-007",
+      "category": "boundary",
+      "tag": "invalid",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true, "request_types": ["regular","stream"] },
+      "auth_status": "valid",
+      "purpose": "Reject or handle null values for all body fields",
+      "expected_status": [400, 422],
+      "notes": "Set every field to null — required fields must be rejected with 400 or 422; optional fields may accept null depending on the spec"
+    },
+    {
+      "id": "TPL-BND-008",
+      "category": "boundary",
+      "tag": "invalid",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true, "request_types": ["regular","stream"] },
+      "auth_status": "valid",
+      "purpose": "Reject or handle empty string values for all string fields",
+      "expected_status": [400, 422],
+      "notes": "Set every string field to \"\" — APIs enforcing non-empty validation should return 400 or 422"
+    },
+    {
+      "id": "TPL-BND-009",
+      "category": "boundary",
+      "tag": "invalid",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true, "request_types": ["regular","stream"] },
+      "auth_status": "valid",
+      "purpose": "Reject or handle zero values for all numeric fields",
+      "expected_status": [400, 422],
+      "notes": "Set every numeric field to 0 — APIs with minimum > 0 constraints should return 400 or 422; if zero is a valid minimum the API may return 2xx"
+    },
+    {
+      "id": "TPL-SEC-001",
+      "category": "security",
+      "tag": "injection",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true, "request_types": ["regular","stream"] },
+      "auth_status": "valid",
+      "purpose": "Reject SQL injection payload in string body fields without exposing DB errors",
+      "expected_status": [400, 422],
+      "notes": "Inject SQL payload into all string fields — API must return 400/422 and must NOT expose database error messages, query structure, or execute the payload"
+    },
+    {
+      "id": "TPL-SEC-002",
+      "category": "security",
+      "tag": "injection",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true, "request_types": ["regular","stream"] },
+      "auth_status": "valid",
+      "purpose": "Reject or sanitize XSS payload in string body fields",
+      "expected_status": [400, 422],
+      "notes": "Inject XSS payload (<script>alert('xss')</script>) into all string fields — API must return 400/422 and must NOT reflect the unescaped script tag in the response"
+    },
+    {
+      "id": "TPL-SEC-003",
+      "category": "security",
+      "tag": "injection",
+      "applies_to": { "methods": ["POST","PUT","PATCH"], "has_body": true, "request_types": ["regular","stream"] },
+      "auth_status": "valid",
+      "purpose": "Reject command injection and path traversal payload in string body fields",
+      "expected_status": [400, 422],
+      "notes": "Inject shell metacharacters and path traversal sequences (e.g. ; ls -la, ../../etc/passwd) into string fields — server must not execute commands or expose filesystem paths in the response"
     },
     {
       "id": "TPL-STR-001",
